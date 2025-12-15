@@ -8,15 +8,15 @@ from pyrogram.errors import FloodWait, UserNotParticipant, ChannelPrivate
 import sqlite3
 
 # Bot ve Userbot API bilgileri
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+API_ID = int(os.environ.get("37107052"))
+API_HASH = os.environ.get("afc7a787cbde453b8fc7134383658b30")
+BOT_TOKEN = os.environ.get("7839067076:AAHgC6C-mzQegzVVHLmkVH08vu-jkTBaQlI")
 
 # Session string için (Render'da kullanmak için)
 USERBOT_STRING = os.environ.get("USERBOT_STRING", "")
 
 # Admin user ID'leri
-ADMINS = list(map(int, os.environ.get("ADMINS", "").split(","))) if os.environ.get("ADMINS") else []
+ADMINS = list(map(int, os.environ.get("8102629232", "").split(","))) if os.environ.get("ADMINS") else []
 
 # Bot client
 bot = Client("content_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -390,3 +390,4 @@ async def main():
 
 if __name__ == "__main__":
     bot.run(main())
+
