@@ -14,9 +14,9 @@ BOT_TOKEN = "7839067076:AAHgC6C-mzQegzVVHLmkVH08vu-jkTBaQlI"
 
 # 2. GİZLİ ASKER (Fake numaranın Session String kodu)
 # Kendi ana hesabının kodunu koyma, yan hesabını koy!
-SESSION_STRING = "1BJWap1sBu7VqUjlAahLEi7V3oE4SuypkAIDMV6S2yHc5YrebqzwLg95vJhR3zer2o--IsSrd34oUn66TOCPZYfJbcGFoH8942WrPjTVY2oYi11m35xq6b_gsK5f73VGP9mtK2gNXDYwqPLQCgu6wHlvf4gd3U02mnt_51_aJfKZBXQh2RUcCQfR2ltdzgUSHreAuwIR3Ql0T2vGpsznXxbI_HM3xC9iUH3RYPeVJSodH8XseRwPKnORLGyAsSzChjFwU6gyKA_Xy1dju7tjlvPJSeYe6l6inyGiiI_1uOveDCbrOn2N08WCUFDWA9LHnrMSJ_owPB-hh-MZTpu6UY3U4JuB93cI="
+SESSION_STRING = "1BJWap1sBu597tdnpQEHOXJuAEfunB-8JiBSy5XvieOE7iLEv_JyZkVEu7dJ0a4p_hXgq0TP8D7bVj2e5hYEFwMDIbUSueo19VGyESSwpfrMq_EFB3usmj5vUDxXeDcoLWHpVCdXtbcJyEpPBQPC4jL4Oh2IPdjO6f9dXlfucJy2V2UTadlSrqdAlOwvoMXHlfJSWQBp8CzdVpRaQYD0wdp-HHJPEkKx7KhELIuZftha7qczEwgU3q1LSgAT-fgk37bnXUSWIgSJG2EekF_73-8GLdRc4vOSJnaaZQHs532WEe1GucIL9uWpajzUb_r8IzsOoFv5J8iqx_I8K6USR98zecpVwGaE="
 
-ADMIN_ID = 8461677620  # Senin ID'n
+ADMIN_ID = 8102629232  # Senin ID'n
 
 # --- FLASK (Botun 7/24 Pella'da çalışması için) ---
 app_web = Flask(__name__)
@@ -190,4 +190,5 @@ async def main():
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
+
     loop.run_until_complete(main())
