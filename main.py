@@ -8,17 +8,30 @@ from pyrogram.errors import FloodWait, UserNotParticipant, ChannelPrivate
 import sqlite3
 
 # Bot ve Userbot API bilgileri
-API_ID = os.environ.get("37107052")
-API_HASH = os.environ.get("afc7a787cbde453b8fc7134383658b30")
-BOT_TOKEN = os.environ.get("7839067076:AAHgC6C-mzQegzVVHLmkVH08vu-jkTBaQlI")
-USERBOT_SESSION = os.environ.get("BAI2NWwAj6zZYFPYXXWDK2fNcBeZYSn7qPtcrB-5dQTPyHazeVF7F_fvw2gLMvB5JyB7exqyKcLicCqG5e_o9z46BbsR1lKZCGxaE9xYm3_O_NMI-8ZciOCn6o5VFUMZJnEappc6Py_6eNA2w7kOB-YpYNCOZp5A4cGF_wY_2LWR9UzSbGIeYLMoYokUrYtYTANDNrxG5lX50WtUusyr6_OX1uHsXIRuyeYWNa0qqZJY0A_KuTKKuFBIpn11H0BXf1DSxj1EvpwTM82rh2S1Oq3CfdROQYS0ADvl68-yTf-Sa2EmbeGEa6sXj_-7Z-QjC9lgOiPltG8FMSvw-kWgKRtF2W89igAAAAH4WvQ0AA"", "userbot")
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Admin user ID'leri (VIP eklemek için)
-ADMINS = list(map(int, os.environ.get("8102629232", "").split(","))) if os.environ.get("ADMINS") else []
+# Session string için (Render'da kullanmak için)
+USERBOT_STRING = os.environ.get("USERBOT_STRING", "")
 
-# Bot ve Userbot client'ları
+# Admin user ID'leri
+ADMINS = list(map(int, os.environ.get("ADMINS", "").split(","))) if os.environ.get("ADMINS") else []
+
+# Bot client
 bot = Client("content_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-userbot = Client(USERBOT_SESSION, api_id=API_ID, api_hash=API_HASH)
+
+# Userbot client - Session string kullanarak
+if USERBOT_STRING:
+    userbot = Client(
+        "userbot_session",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        session_string=USERBOT_STRING
+    )
+else:
+    # Local test için session dosyası
+    userbot = Client("userbot", api_id=API_ID, api_hash=API_HASH)
 
 # Veritabanı başlatma
 def init_db():
@@ -185,7 +198,6 @@ async def vip_command(client, message: Message):
         
         await message.reply_text(f"✅ Kullanıcı {target_user_id} VIP yapıldı!")
         
-        # Kullanıcıya bildirim gönder
         try:
             await bot.send_message(target_user_id, 
                 "🌟 **Tebrikler!** VIP kullanıcı oldun!\n\n"
@@ -240,12 +252,10 @@ async def handle_link(client, message: Message):
     try:
         # Link formatını parse et
         if "t.me/" in text:
-            # https://t.me/kanal/123 formatı
             parts = text.split("t.me/")[1].split("/")
             channel = parts[0]
             msg_id = int(parts[1]) if len(parts) > 1 else None
         elif text.startswith("@"):
-            # @kanal/123 formatı
             parts = text[1:].split("/")
             channel = parts[0]
             msg_id = int(parts[1]) if len(parts) > 1 else None
@@ -257,12 +267,11 @@ async def handle_link(client, message: Message):
             await message.reply_text("❌ Mesaj ID'si bulunamadı! Tam linki gönder.")
             return
         
-        # İşlem başlıyor mesajı
         status_msg = await message.reply_text("⏳ İçerik çekiliyor, lütfen bekle...")
         
         # VIP değilse bekleme süresi ekle
         if not is_vip:
-            await asyncio.sleep(3)  # 3 saniye bekleme
+            await asyncio.sleep(3)
         
         # Userbot ile içerik çekme
         try:
@@ -319,7 +328,6 @@ async def handle_link(client, message: Message):
     except Exception as e:
         await message.reply_text(f"❌ Link parse edilemedi: {str(e)}")
 
-# Callback query handler
 @bot.on_callback_query()
 async def callback_handler(client, callback_query):
     data = callback_query.data
@@ -372,8 +380,10 @@ async def main():
     await bot.start()
     await userbot.start()
     
+    me = await userbot.get_me()
     print("✅ Bot ve Userbot başlatıldı!")
-    print(f"Bot username: @{(await bot.get_me()).username}")
+    print(f"🤖 Bot username: @{(await bot.get_me()).username}")
+    print(f"👤 Userbot: {me.first_name} (@{me.username})")
     
     # Botu çalışır durumda tut
     await asyncio.Event().wait()
