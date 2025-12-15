@@ -1,184 +1,167 @@
 import os
 import asyncio
 import threading
-from telethon import TelegramClient, events
+import sqlite3
+import time
+from datetime import datetime
+from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
-from telethon.errors import FloodWaitError
 from flask import Flask
 
-# --- 1. RENDER İÇİN WEB SUNUCUSU (Uyumaması İçin) ---
+# --- 1. RENDER WEB SUNUCUSU ---
 app = Flask(__name__)
-
 @app.route('/')
-def home():
-    return "Telethon Userbot Aktif!"
+def home(): return "Sistem Aktif! Patronun hesabı devrede."
+def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-def run_web():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
-
-# --- 2. AYARLAR (Render Environment Variables'dan Alır) ---
-# Eğer Render'a girmezsen varsayılan değerler hata verir.
+# --- 2. AYARLAR ---
 API_ID = int(os.environ.get("API_ID", "0"))
 API_HASH = os.environ.get("API_HASH", "")
-SESSION_STRING = os.environ.get("SESSION_STRING", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")       
+SESSION_STRING = os.environ.get("SESSION_STRING", "") # BURAYA KENDİ ANA HESABININ KODU GELECEK
+ADMINS = list(map(int, os.environ.get("ALLOWED_USERS", "").split(","))) if os.environ.get("ALLOWED_USERS") else []
 
-# Admin ID (Virgülle ayırarak birden fazla girebilirsin)
-ALLOWED_USERS = list(map(int, os.environ.get("ALLOWED_USERS", "").split(","))) if os.environ.get("ALLOWED_USERS") else []
+# --- 3. BAŞLATMA ---
+# Müşteri Botu
+bot = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+# Senin Hesabın (Gizli Userbot)
+userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-# --- 3. CLIENT BAŞLATMA ---
-if not SESSION_STRING:
-    print("HATA: SESSION_STRING bulunamadı! Render ayarlarına ekle.")
-    exit(1)
+# --- 4. VERİTABANI ---
+def init_db():
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
+    conn.execute('''CREATE TABLE IF NOT EXISTS users 
+                 (user_id INTEGER PRIMARY KEY, is_vip INTEGER DEFAULT 0, daily_limit INTEGER DEFAULT 3, last_reset TEXT)''')
+    conn.commit(); conn.close()
 
-client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+def get_user(user_id):
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    user = c.fetchone()
+    today = datetime.now().strftime("%Y-%m-%d")
+    if user is None:
+        c.execute("INSERT INTO users (user_id, last_reset) VALUES (?, ?)", (user_id, today))
+        conn.commit(); conn.close(); return (user_id, 0, 3, today)
+    if user[3] != today and user[1] == 0:
+        c.execute("UPDATE users SET daily_limit=3, last_reset=? WHERE user_id=?", (today, user_id))
+        conn.commit(); conn.close(); return (user_id, 0, 3, today)
+    conn.close(); return user
 
-# --- 4. YARDIMCI FONKSİYONLAR ---
-def is_authorized(user_id):
-    """Kullanıcı yetkisi kontrolü"""
-    if not ALLOWED_USERS: return True # Liste boşsa herkese açık (Riskli olabilir)
-    return user_id in ALLOWED_USERS
+def dusur_hak(user_id):
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
+    conn.execute("UPDATE users SET daily_limit = daily_limit - 1 WHERE user_id=?", (user_id,))
+    conn.commit(); conn.close()
 
-async def get_message_from_link(link):
-    """Mesaj linkinden mesaj objesini alır (Private/Public fark etmez)"""
-    try:
-        link = link.strip().split('?')[0] # Linki temizle
-        parts = link.rstrip('/').split('/')
-        message_id = int(parts[-1])
-
-        if 't.me/c/' in link:
-            # Özel kanal/grup: https://t.me/c/1234567890/123
-            # Telethon'da private ID'ler -100 ile başlamaz, direkt ID verilir ama 
-            # PeerChannel oluştururken -100 gerekebilir.
-            # En garantisi entity'yi çözümlemektir.
-            channel_id = int(parts[-2])
-            # Telethon'da private kanallar için -100 ekleyip get_entity yapmak genelde çalışır
-            entity = await client.get_entity(int(f'-100{channel_id}'))
-        else:
-            # Public kanal: https://t.me/kanaladi/123
-            username = parts[-2]
-            entity = await client.get_entity(username)
-
-        return await client.get_messages(entity, ids=message_id)
-
-    except FloodWaitError as e:
-        print(f"⏳ FloodWait: {e.seconds} saniye bekleniyor...")
-        await asyncio.sleep(e.seconds + 2)
-        return await get_message_from_link(link)
-    except Exception as e:
-        print(f"Mesaj alma hatası: {e}")
-        return None
+def set_vip(user_id, status):
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
+    conn.execute("UPDATE users SET is_vip=? WHERE user_id=?", (status, user_id))
+    conn.commit(); conn.close()
 
 # --- 5. KOMUTLAR ---
-
-@client.on(events.NewMessage(pattern='/start'))
+@bot.on(events.NewMessage(pattern='/start'))
 async def start(event):
-    if not is_authorized(event.sender_id): return
-    await event.respond(
-        "🤖 **Telethon Userbot Aktif!**\n\n"
-        "⚡ **İletim Kapalı İçerik Çekici**\n"
-        "`/copy [link]` - Metni kopyalar\n"
-        "`/getmedia [link]` - Medyayı indirip atar\n"
-        "`/transfer [kaynak] [hedef] [adet]` - Toplu aktarım\n"
-    )
+    uid = event.sender_id
+    u = get_user(uid)
+    vip = u[1] == 1
+    
+    if uid in ADMINS:
+        msg = "👑 **PATRON MODU**\nSenin hesabın üzerinden her yerden veri çekebilirim.\n`/vip ID` ile müşteri yönet."
+    elif vip:
+        msg = "🌟 **VIP MÜŞTERİ**\nSınırsız hakkınız var. Link gönderin."
+    else:
+        msg = f"👋 **Deneme Sürümü**\nHakkın: {u[2]}/3. \n\nÖzel kanallardan (Patronun olduğu) içerik çekebilirsin."
+    await event.respond(msg)
 
-@client.on(events.NewMessage(pattern='/copy'))
-async def copy_text(event):
-    if not is_authorized(event.sender_id): return
+@bot.on(events.NewMessage(pattern='/vip'))
+async def vip_yap(event):
+    if event.sender_id in ADMINS:
+        try: set_vip(int(event.text.split()[1]), 1); await event.respond("✅ VIP Yapıldı.")
+        except: pass
+
+@bot.on(events.NewMessage(pattern='/unvip'))
+async def vip_al(event):
+    if event.sender_id in ADMINS:
+        try: set_vip(int(event.text.split()[1]), 0); await event.respond("❌ Normal Üye Oldu.")
+        except: pass
+
+# --- 6. İÇERİK ÇEKİCİ (TRUVA ATI MODU) ---
+@bot.on(events.NewMessage)
+async def downloader(event):
+    if not event.is_private or event.message.text.startswith('/'): return
+    
+    uid = event.sender_id
+    u = get_user(uid)
+    vip = u[1] == 1
+    limit = u[2]
+    
+    if uid not in ADMINS and not vip:
+        if limit <= 0: await event.respond("⛔ Limit doldu. VIP al."); return
+        status = await event.respond("⏳ **Sıraya alındı (Bekle)...**"); await asyncio.sleep(5)
+    else:
+        status = await event.respond("🔄 **İşleniyor...**")
+
+    text = event.message.text.strip()
+    
     try:
-        link = event.message.text.split(' ', 1)[1]
-        msg = await get_message_from_link(link)
-        if msg and msg.text:
-            await event.respond(f"📄 **İçerik:**\n\n{msg.text}")
+        # Link Analizi
+        msg_id = None
+        entity = None
+        
+        # 1. Özel/Gizli Kanal Linki (t.me/c/...)
+        # Sen zaten içeridesin, direkt ID ile çekiyoruz.
+        if 't.me/c/' in text:
+            parts = text.split('t.me/c/')[1].split('/')
+            channel_id = int(parts[0])
+            msg_id = int(parts[1])
+            # Telethon için ID düzeltmesi (-100 ekle)
+            entity = await userbot.get_entity(int(f'-100{channel_id}'))
+            
+        # 2. Public Kanal Linki
+        elif 't.me/' in text:
+            parts = text.split('t.me/')[1].split('/')
+            username = parts[0]
+            msg_id = int(parts[1])
+            entity = await userbot.get_entity(username)
+            
         else:
-            await event.respond("❌ Metin bulunamadı.")
-    except: await event.respond("Kullanım: /copy link")
+            await status.edit("❌ Geçersiz Link."); return
 
-@client.on(events.NewMessage(pattern='/getmedia'))
-async def get_media(event):
-    if not is_authorized(event.sender_id): return
-    try:
-        link = event.message.text.split(' ', 1)[1]
-        status = await event.respond("⏳ **İndiriliyor...**")
-        
-        msg = await get_message_from_link(link)
-        
-        if not msg or not msg.media:
-            await status.edit("❌ Medya bulunamadı veya erişilemedi.")
+        # Mesajı AL (Senin Gözünle)
+        try:
+            msg = await userbot.get_messages(entity, ids=msg_id)
+        except Exception as e:
+            await status.edit("❌ **Erişim Yok!**\nPatron (Admin) bu grupta ekli değil. Önce Adminin gruba girmesi lazım.")
             return
 
-        # Render diskine indir
-        file_path = await client.download_media(msg.media)
+        if not msg or not msg.media:
+            await status.edit("❌ Medya bulunamadı veya silinmiş."); return
+
+        # İndir
+        await status.edit("⬇️ **İndiriliyor...**")
+        path = await userbot.download_media(msg.media)
         
+        # Yükle
         await status.edit("⬆️ **Yükleniyor...**")
+        await bot.send_file(event.chat_id, path, caption=msg.text or "")
         
-        # Gönder
-        await client.send_file(event.chat_id, file_path, caption=msg.text or "")
+        # Sil
+        if os.path.exists(path): os.remove(path)
         
-        # Sil (Disk dolmasın)
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            
+        # Hak Düş
+        if uid not in ADMINS and not vip: use_right(uid)
         await status.delete()
 
     except Exception as e:
-        await event.respond(f"❌ Hata: {str(e)}")
+        await status.edit(f"❌ Hata: {str(e)}")
+        if 'path' in locals() and path and os.path.exists(path): os.remove(path)
 
-@client.on(events.NewMessage(pattern='/transfer'))
-async def transfer(event):
-    if not is_authorized(event.sender_id): return
-    try:
-        args = event.message.text.split()
-        if len(args) < 4:
-            await event.respond("Kullanım: `/transfer [kaynak] [hedef] [adet]`")
-            return
-
-        src = args[1]
-        dst = args[2]
-        limit = int(args[3])
-        
-        status = await event.respond(f"🚀 **Transfer Başlıyor...**\nLimit: {limit}")
-        
-        # Hedef entity
-        if 't.me/' in dst:
-            dst_entity = await client.get_entity(dst.split('/')[-1])
-        else:
-            dst_entity = await client.get_entity(dst)
-
-        # Kaynak entity (get_message_from_link mantığına benzer, tüm mesajları çekeceğiz)
-        if 't.me/c/' in src:
-            cid = int(src.split('/')[-2])
-            src_entity = await client.get_entity(int(f'-100{cid}'))
-        else:
-            src_entity = await client.get_entity(src.split('/')[-1])
-
-        count = 0
-        async for msg in client.iter_messages(src_entity, limit=limit):
-            if msg.media:
-                try:
-                    path = await client.download_media(msg.media)
-                    await client.send_file(dst_entity, path, caption=msg.text)
-                    if os.path.exists(path): os.remove(path)
-                    count += 1
-                    if count % 5 == 0: await status.edit(f"✅ {count} adet aktarıldı...")
-                except Exception as e:
-                    print(f"Hata: {e}")
-                    continue
-        
-        await status.edit(f"🏁 **Tamamlandı!** Toplam {count} medya aktarıldı.")
-
-    except Exception as e:
-        await event.respond(f"❌ Hata: {e}")
-
-# --- 6. BAŞLATMA ---
+# --- BAŞLATMA ---
 def main():
-    # Flask'ı ayrı thread'de başlat
     threading.Thread(target=run_web).start()
-    
-    print("Userbot Başlatılıyor...")
-    client.start()
-    client.run_until_disconnected()
+    userbot.start()
+    print("Sistem Hazır!")
+    bot.run_until_disconnected()
 
 if __name__ == '__main__':
     main()
