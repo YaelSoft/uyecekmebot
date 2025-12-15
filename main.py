@@ -156,12 +156,25 @@ async def downloader(event):
         await status.edit(f"❌ Hata: {str(e)}")
         if 'path' in locals() and path and os.path.exists(path): os.remove(path)
 
-# --- BAŞLATMA ---
+# --- 7. BAŞLATMA ---
 def main():
+    # 1. ÖNCE VERİTABANINI KURUYORUZ (Hatayı çözen satır burası)
+    init_db()
+    print("✅ Veritabanı Hazır!")
+    
+    # 2. Flask Sunucusunu (7/24) Başlatıyoruz
     threading.Thread(target=run_web).start()
+    
+    print("🚀 Userbot Başlatılıyor...")
+    
+    # 3. Userbot'u aktif ediyoruz
     userbot.start()
-    print("Sistem Hazır!")
+    
+    print("✅ SİSTEM TAMAMEN AKTİF! Müşteri Bekleniyor...")
+    
+    # 4. Botu dinlemeye alıyoruz (Bu kod botun kapanmasını engeller)
     bot.run_until_disconnected()
 
 if __name__ == '__main__':
     main()
+
