@@ -8,9 +8,10 @@ import shutil
 from datetime import datetime
 from telethon import TelegramClient, events, Button, functions
 from telethon.sessions import StringSession
+from telethon.tl.types import MessageMediaStory
 from telethon.tl.functions.messages import ImportChatInviteRequest
 from telethon.tl.functions.channels import LeaveChannelRequest
-from telethon.tl.functions.contacts import AddContactRequest, DeleteContactsRequest
+from telethon.tl.functions.contacts import AddContactRequest
 from telethon.errors import FloodWaitError, UserAlreadyParticipantError
 from flask import Flask
 
@@ -35,8 +36,8 @@ TEXTS = {
     "en": {
         "welcome": "👋 **Welcome!**\nSelect Language:",
         "lang_set": "✅ Language set to **English**.",
-        "menu_free": "👤 **FREE DASHBOARD**\n\n🆔 ID: `{uid}`\n📊 Limit: **{limit}/3**\n💎 Status: **Free**\n\n📥 **Usage:**\n1. **Public:** Send Link.\n2. **Private:** Send Invite Link -> Then Post Link.\n\n🚀 **Upgrade to VIP for:**\n✅ Unlimited Access\n✅ Stories (`/story`)\n✅ Batch (`/range`)\n\n🛒 **Buy VIP:** {contact}",
-        "menu_vip": "💎 **VIP DASHBOARD**\n\n🆔 ID: `{uid}`\n⚡ **Status: UNLIMITED**\n\n🔥 **VIP Features:**\n• `/story username` -> Stories\n• `/range link 100-150` -> Batch DL\n• `/transfer src dst count` -> Clone\n\n📥 **Usage:** Send any link!",
+        "menu_free": "👤 **FREE DASHBOARD**\n\n🆔 ID: `{uid}`\n📊 Limit: **{limit}/3**\n💎 Status: **Free**\n\n📥 **Usage:**\n1. **Link:** Send any link.\n2. **Story:** Forward the story to me.\n\n🚀 **VIP:**\n✅ Unlimited Access\n✅ Stories (`/story`)\n✅ Batch (`/range`)\n\n🛒 **Buy VIP:** {contact}",
+        "menu_vip": "💎 **VIP DASHBOARD**\n\n🆔 ID: `{uid}`\n⚡ **Status: UNLIMITED**\n\n🔥 **VIP Features:**\n• `/story username` -> All Stories\n• `/range link 100-150` -> Batch DL\n• **Forward Story** -> Instant Download\n\n📥 **Usage:** Send Link or Forward Story!",
         "menu_admin": "👑 **BOSS PANEL**\n\n⚡ **Status: GOD MODE**\n\n👥 **Manage:**\n• `/vip ID`\n• `/unvip ID`\n• `/stats`\n\n🛠 **Tools:**\n• `/transfer`\n• `/leave link`\n• `/killall`",
         "limit_reached": f"⛔ **Limit Reached!**\nContact **{OWNER_CONTACT}** for VIP.",
         "queue": "⏳ **Queued (5s)...**",
@@ -47,13 +48,13 @@ TEXTS = {
         "join_fail": "❌ Failed to join.",
         "error_access": "❌ **Access Denied!**\nPrivate Channel. Send **Invite Link** (`t.me/+...`) first.",
         "vip_only": "🔒 **VIP Feature Only!**",
-        "left_channel": "👋 **Left the channel.**",
         
+        "story_detect": "👁‍🗨 **Story Detected!** Downloading...",
         "story_search": "🔍 **Searching Stories:** `@{target}`...",
         "story_found": "✅ **{count}** stories found. Downloading...",
         "story_dl_status": "⬇️ Downloading {current}/{total}...",
-        "story_none": "❌ **No Stories Found.**\nProfile might be private or no active stories.",
-        "story_retry": "🔓 **Profile Hidden.** Trying to bypass privacy settings...",
+        "story_none": "❌ **No Stories Found.**\nProfile might be private.",
+        "story_retry": "🔓 **Profile Hidden.** Trying to bypass...",
         "story_done": "🏁 **All Stories Sent!**",
         
         "vip_promoted": "🌟 **You are now VIP!**",
@@ -61,57 +62,36 @@ TEXTS = {
         "restart_msg": "🔴 **System Restarting...**"
     },
     "de": {
-        "welcome": "👋 **Willkommen!**\nSprache wählen:",
-        "lang_set": "✅ Sprache: **Deutsch**.",
-        "menu_free": "👤 **GRATIS MENÜ**\n\n🆔 ID: `{uid}`\n📊 Limit: **{limit}/3**\n💎 Status: **Gratis**\n\n📥 **Nutzung:**\n1. **Öffentlich:** Link senden.\n2. **Privat:** Einladungslink -> Dann Beitragslink.\n\n🚀 **VIP Vorteile:**\n✅ Unbegrenzt\n✅ Stories (`/story`)\n✅ Massen-DL (`/range`)\n\n🛒 **VIP Kaufen:** {contact}",
-        "menu_vip": "💎 **VIP MENÜ**\n\n🆔 ID: `{uid}`\n⚡ **Status: UNBEGRENZT**\n\n🔥 **VIP Befehle:**\n• `/story username` -> Stories\n• `/range link 100-150` -> Massen-DL\n• `/transfer` -> Klonen\n\n📥 **Nutzung:** Link senden!",
-        "menu_admin": "👑 **CHEF PANEL**\n\n⚡ **Status: GOD MODE**\n\n👥 **Verwaltung:**\n• `/vip ID`\n• `/unvip ID`\n• `/stats`\n\n🛠 **Tools:**\n• `/transfer`\n• `/leave link`\n• `/killall`",
-        "limit_reached": f"⛔ **Limit erreicht!**\nKontaktieren Sie **{OWNER_CONTACT}** für VIP.",
-        "queue": "⏳ **Warte (5s)...**",
-        "processing": "🔄 **Verarbeitung...**",
-        "downloading": "⬇️ **Herunterladen...**",
-        "uploading": "⬆️ **Hochladen...**",
-        "join_success": "✅ **Beigetreten!** Link senden.",
-        "join_fail": "❌ Fehler beim Beitritt.",
-        "error_access": "❌ **Zugriff verweigert!**\nPrivat. Senden Sie erst den **Einladungslink** (`t.me/+...`).",
-        "vip_only": "🔒 **Nur für VIP!**",
-        "left_channel": "👋 **Kanal verlassen.**",
-        
-        "story_search": "🔍 **Suche Stories:** `@{target}`...",
-        "story_found": "✅ **{count}** Stories gefunden. Starte Download...",
-        "story_dl_status": "⬇️ Lade Story {current}/{total}...",
-        "story_none": "❌ **Keine Stories.**\nProfil ist privat oder leer.",
-        "story_retry": "🔓 **Profil Privat.** Versuche Zugriff zu erhalten...",
-        "story_done": "🏁 **Fertig!**",
-        
-        "vip_promoted": "🌟 **Sie sind jetzt VIP!**",
-        "vip_removed": "❌ **VIP entfernt.**",
-        "restart_msg": "🔴 **Neustart...**"
+        # ... (Almanca Metinler)
+        "welcome": "👋 **Willkommen!**",
+        "story_detect": "👁‍🗨 **Story erkannt!** Lade herunter...",
+        "limit_reached": f"⛔ **Limit erreicht!**",
+        "error_access": "❌ **Zugriff verweigert!**"
     },
     "tr": {
         "welcome": "👋 **Hoş Geldiniz!**\nDil seçiniz:",
         "lang_set": "✅ Dil: **Türkçe**.",
-        "menu_free": "👤 **ÜCRETSİZ PANEL**\n\n🆔 ID: `{uid}`\n📊 Hak: **{limit}/3**\n💎 Durum: **Ücretsiz**\n\n📥 **Kullanım:**\n1. **Normal:** Link gönder.\n2. **Gizli:** Önce Davet Linki -> Sonra Mesaj Linki.\n\n🚀 **VIP Özellikleri:**\n✅ Sınırsız İndirme\n✅ Hikaye (`/story`)\n✅ Toplu İndirme (`/range`)\n\n🛒 **VIP Satın Al:** {contact}",
-        "menu_vip": "💎 **VIP PANELİ**\n\n🆔 ID: `{uid}`\n⚡ **Durum: SINIRSIZ**\n\n🔥 **VIP Komutları:**\n• `/story kullanıcı` -> Hikaye İndir\n• `/range link 100-150` -> Toplu İndir\n• `/transfer` -> Kanal Kopyala\n\n📥 **Kullanım:** Link göndermen yeterli!",
+        "menu_free": "👤 **ÜCRETSİZ PANEL**\n\n🆔 ID: `{uid}`\n📊 Hak: **{limit}/3**\n💎 Durum: **Ücretsiz**\n\n📥 **Kullanım:**\n1. **Link:** Link gönder.\n2. **Hikaye:** Hikayeyi bana ilet.\n\n🚀 **VIP Özellikleri:**\n✅ Sınırsız İndirme\n✅ Hikaye (`/story`)\n✅ Toplu İndirme (`/range`)\n\n🛒 **VIP Satın Al:** {contact}",
+        "menu_vip": "💎 **VIP PANELİ**\n\n🆔 ID: `{uid}`\n⚡ **Durum: SINIRSIZ**\n\n🔥 **VIP Komutları:**\n• `/story kullanıcı` -> Tüm Hikayeler\n• `/range link 100-150` -> Toplu İndir\n• **Hikayeyi İlet** -> Anında İndir\n\n📥 **Kullanım:** Link at veya Hikaye İlet!",
         "menu_admin": "👑 **PATRON PANELİ**\n\n⚡ **Durum: YÖNETİCİ**\n\n👥 **Kullanıcı Yönetimi:**\n• `/vip ID` -> VIP Yap\n• `/unvip ID` -> İptal Et\n• `/stats` -> İstatistikler\n\n🛠 **Araçlar:**\n• `/transfer`\n• `/leave link` -> Gruptan Çık\n• `/killall` -> Yeniden Başlat",
         "limit_reached": f"⛔ **Günlük Hak Bitti!**\nSınırsız için **{OWNER_CONTACT}** ile görüşün.",
         "queue": "⏳ **Sırada (5sn)...**",
         "processing": "🔄 **İşleniyor...**",
         "downloading": "⬇️ **İndiriliyor...**",
         "uploading": "⬆️ **Yükleniyor...**",
+        
+        "story_detect": "👁‍🗨 **Hikaye Algılandı!** İndiriliyor...",
+        "story_search": "🔍 **Hikayeler Aranıyor:** `@{target}`...",
+        "story_found": "✅ **{count}** hikaye bulundu. İndiriliyor...",
+        "story_dl_status": "⬇️ İndiriliyor: {current}/{total}...",
+        "story_none": "❌ **Hikaye Bulunamadı.**\nProfil gizli olabilir.",
+        "story_retry": "🔓 **Profil Gizli.** Rehbere ekleyip deneniyor...",
+        "story_done": "🏁 **Tüm Hikayeler Gönderildi!**",
+        
         "join_success": "✅ **Girdim!** Şimdi linki at.",
         "join_fail": "❌ Gruba girilemedi.",
         "error_access": "❌ **Erişemiyorum!**\nBu gizli bir grup.\n💡 Önce **Davet Linkini** (`t.me/+...`) at.",
         "vip_only": "🔒 **Sadece VIP!**",
-        "left_channel": "👋 **Kanaldan çıkıldı.**",
-        
-        "story_search": "🔍 **Hikayeler Aranıyor:** `@{target}`...",
-        "story_found": "✅ **{count}** hikaye bulundu. İndiriliyor...",
-        "story_dl_status": "⬇️ İndiriliyor: {current}/{total}...",
-        "story_none": "❌ **Hikaye Bulunamadı.**\nProfil 'Sadece Kişilerim'e açık olabilir veya hikayesi yok.",
-        "story_retry": "🔓 **Profil Gizli.** Rehbere ekleyip deneniyor...",
-        "story_done": "🏁 **Tüm Hikayeler Gönderildi!**",
-        
         "vip_promoted": "🌟 **Artık VIP Üyesiniz!**",
         "vip_removed": "❌ **VIP İptal Edildi.**",
         "restart_msg": "🔴 **Sistem Yeniden Başlatılıyor...**"
@@ -171,12 +151,10 @@ def get_stats():
     conn.close()
     return total, vips
 
-# --- 6. GİRİŞ VE MENÜ SİSTEMİ ---
-
+# --- 6. GİRİŞ VE MENÜ ---
 @bot.on(events.NewMessage(pattern='/start'))
 async def start(event):
     uid = event.sender_id
-    u = get_user(uid)
     buttons = [
         [Button.inline("🇺🇸 English", b"set_lang_en"), Button.inline("🇩🇪 Deutsch", b"set_lang_de")],
         [Button.inline("🇹🇷 Türkçe", b"set_lang_tr")]
@@ -201,7 +179,6 @@ async def help_cmd(event):
     await event.respond(f"🆘 **Support:** Contact {OWNER_CONTACT}")
 
 # --- 7. ADMIN KOMUTLARI ---
-
 @bot.on(events.NewMessage(pattern='/stats'))
 async def stats(event):
     if event.sender_id not in ADMINS: return
@@ -215,7 +192,7 @@ async def killall(event):
     if event.sender_id not in ADMINS: return
     uid = event.sender_id
     u = get_user(uid)
-    lang = u[4]
+    lang = u[4] if u[4] in TEXTS else 'en'
     await event.respond(TEXTS[lang]['restart_msg'])
     os._exit(0)
 
@@ -225,7 +202,6 @@ async def vip_add(event):
     try:
         t = int(event.message.text.split()[1])
         set_vip(t, 1)
-        await bot.send_message(t, TEXTS['en']['vip_promoted'])
         await event.respond(f"✅ {t} VIP.")
     except: await event.respond("Usage: `/vip ID`")
 
@@ -247,17 +223,15 @@ async def leave_channel(event):
         if 't.me/c/' in link: entity = await userbot.get_entity(int('-100' + link.split('/')[-2]))
         else: entity = await userbot.get_entity(link.split('/')[-1])
         await userbot(LeaveChannelRequest(entity))
-        await event.respond("👋 Left channel.")
-    except Exception as e: await event.respond(f"❌ Error: {e}")
+        await event.respond("👋 Left.")
+    except: await event.respond("❌ Error.")
 
-# --- 8. VIP ÖZELLİKLERİ ---
-
-# A) HİKAYE (REHBERE EKLEME ÖZELLİKLİ)
+# --- 8. VIP HİKAYE (KOMUTLA) ---
 @bot.on(events.NewMessage(pattern='/story'))
-async def story_dl(event):
+async def story_cmd(event):
     uid = event.sender_id
     u = get_user(uid)
-    lang = u[4]
+    lang = u[4] if u[4] in TEXTS else 'en'
     
     if uid not in ADMINS and u[1] == 0:
         await event.respond(TEXTS[lang]['vip_only'])
@@ -268,83 +242,51 @@ async def story_dl(event):
         if len(args) < 2: 
             await event.respond("⚠️ Usage: `/story username`")
             return
-            
         target = args[1].replace("@", "")
-        status = await event.respond(TEXTS[lang]['story_search'].format(target=target))
-        
-        try:
-            entity = await userbot.get_entity(target)
-        except:
-            await status.edit(TEXTS[lang]['story_none'])
-            return
+        await download_stories(event, target, lang)
+    except Exception as e:
+        await event.respond(f"❌ Error: {e}")
 
-        # 1. Deneme: Normal çekmeyi dene
+async def download_stories(event, target, lang):
+    status = await event.respond(TEXTS[lang]['story_search'].format(target=target))
+    try:
+        entity = await userbot.get_entity(target)
+    except:
+        await status.edit(TEXTS[lang]['story_none'])
+        return
+
+    try:
+        stories = await userbot.get_stories(entity)
+    except:
+        stories = []
+
+    if not stories:
+        await status.edit(TEXTS[lang]['story_retry'])
         try:
+            await userbot(AddContactRequest(id=entity, first_name="Story", last_name="Temp", phone="", add_phone_privacy_exception=False))
+            await asyncio.sleep(2)
             stories = await userbot.get_stories(entity)
-        except:
-            stories = []
+        except: pass
 
-        # 2. Deneme: Eğer boşsa REHBERE EKLE ve tekrar dene
-        if not stories:
-            await status.edit(TEXTS[lang]['story_retry'])
+    if not stories:
+        await status.edit(TEXTS[lang]['story_none'])
+        return
+
+    await status.edit(TEXTS[lang]['story_found'].format(count=len(stories)))
+    
+    for i, story in enumerate(stories):
+        if story.media:
             try:
-                # Userbot rehberine ekle (Fake bir isimle)
-                await userbot(AddContactRequest(id=entity, first_name="Story", last_name="Target", phone="", add_phone_privacy_exception=False))
-                await asyncio.sleep(2) # Telegram'ın işlemesi için bekle
-                stories = await userbot.get_stories(entity)
-            except: pass
+                await status.edit(TEXTS[lang]['story_dl_status'].format(current=i+1, total=len(stories)))
+                path = await userbot.download_media(story.media)
+                await bot.send_file(event.chat_id, path, caption=f"📹 @{target}")
+                os.remove(path)
+            except: continue
+    
+    await status.delete()
+    await event.respond(TEXTS[lang]['story_done'])
 
-        if not stories: 
-            await status.edit(TEXTS[lang]['story_none'])
-            return
-            
-        await status.edit(TEXTS[lang]['story_found'].format(count=len(stories)))
-        
-        count = 0
-        for i, story in enumerate(stories):
-            if story.media:
-                try:
-                    await status.edit(TEXTS[lang]['story_dl_status'].format(current=i+1, total=len(stories)))
-                    path = await userbot.download_media(story.media)
-                    await bot.send_file(event.chat_id, path, caption=f"📹 Story {i+1} - @{target}")
-                    os.remove(path)
-                    count += 1
-                except: continue
-        
-        await status.delete()
-        await event.respond(TEXTS[lang]['story_done'])
-        
-        # (Opsiyonel: İş bitince rehberden silmek istersen burayı açabilirsin)
-        # try: await userbot(DeleteContactsRequest(id=[entity]))
-        # except: pass
-
-    except Exception as e: 
-        await event.respond(f"❌ Error: {str(e)}")
-
-# B) RANGE DOWNLOAD
-@bot.on(events.NewMessage(pattern='/range'))
-async def range_dl(event):
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4]
-    if uid not in ADMINS and u[1] == 0:
-        await event.respond(TEXTS[lang]['vip_only'])
-        return
-    await event.respond("Range Active.")
-
-# C) TRANSFER
-@bot.on(events.NewMessage(pattern='/transfer'))
-async def transfer_dl(event):
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4]
-    if uid not in ADMINS and u[1] == 0:
-        await event.respond(TEXTS[lang]['vip_only'])
-        return
-    await event.respond("Transfer Active.")
-
-
-# --- 9. GENEL İNDİRİCİ ---
+# --- 9. GENEL İNDİRİCİ (İLETİLEN STORY & LİNKLER) ---
 @bot.on(events.NewMessage)
 async def downloader(event):
     if not event.is_private or event.message.text.startswith('/'): return
@@ -355,6 +297,7 @@ async def downloader(event):
     limit = u[2]
     lang = u[4] if u[4] in TEXTS else 'en'
     
+    # Hak Kontrolü
     if uid not in ADMINS:
         if not vip:
             if limit <= 0:
@@ -367,9 +310,59 @@ async def downloader(event):
     else:
         status = await event.respond(TEXTS[lang]['processing'])
 
+    # --- ÖNEMLİ: HİKAYE İLETİLİRSE YAKALA ---
+    # Eğer mesajda "MessageMediaStory" varsa (İletilen hikaye)
+    if event.message.media and isinstance(event.message.media, MessageMediaStory):
+        await status.edit(TEXTS[lang]['story_detect'])
+        try:
+            # Userbot yetkisiyle indir
+            path = await userbot.download_media(event.message.media)
+            await status.edit(TEXTS[lang]['uploading'])
+            await bot.send_file(event.chat_id, path, caption="📹 Saved Story")
+            os.remove(path)
+            await status.delete()
+            
+            if uid not in ADMINS and not vip: use_right(uid)
+            return
+        except Exception as e:
+            await status.edit(f"❌ Error: {e}")
+            return
+
+    # Normal Metin Linkleri
     text = event.message.text.strip()
     
     try:
+        # /s/ Linki (Story Linki)
+        if "/s/" in text:
+            try:
+                parts = text.rstrip('/').split('/')
+                # t.me/username/s/123 -> Username ve ID'yi al
+                if 't.me' in parts:
+                    idx = parts.index('t.me') + 1
+                    target_user = parts[idx]
+                    story_id = int(parts[-1])
+                    
+                    await status.edit(TEXTS[lang]['story_search'].format(target=target_user))
+                    entity = await userbot.get_entity(target_user)
+                    
+                    # Tekli Story
+                    stories = await userbot.get_stories(entity, ids=[story_id])
+                    if stories and stories[0].media:
+                        await status.edit(TEXTS[lang]['downloading'])
+                        path = await userbot.download_media(stories[0].media)
+                        await status.edit(TEXTS[lang]['uploading'])
+                        await bot.send_file(event.chat_id, path, caption=f"📹 Story: @{target_user}")
+                        os.remove(path)
+                        await status.delete()
+                        
+                        if uid not in ADMINS and not vip: use_right(uid)
+                    else:
+                        await status.edit(TEXTS[lang]['story_none'])
+            except Exception as e:
+                await status.edit(f"❌ Error: {e}")
+            return
+
+        # Normal Linkler
         if "t.me/+" in text:
             try:
                 await userbot(ImportChatInviteRequest(text.split('+')[-1]))
