@@ -1,443 +1,305 @@
 import os
 import asyncio
-import json
-from datetime import datetime, timedelta
-from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait, UserNotParticipant, ChannelPrivate, ChatForwardsRestricted
+import threading
 import sqlite3
+import time
+import sys
+import shutil
+from datetime import datetime
+from telethon import TelegramClient, events, Button, functions
+from telethon.sessions import StringSession
+from telethon.tl.functions.messages import ImportChatInviteRequest
+from telethon.errors import FloodWaitError, UserAlreadyParticipantError
+from flask import Flask
 
-# Bot ve Userbot API bilgileri
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# --- 1. RENDER WEB SUNUCUSU ---
+app = Flask(__name__)
+@app.route('/')
+def home(): return "Global Bot System Active!"
+def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-# Session string için (Render'da kullanmak için)
-USERBOT_STRING = os.environ.get("USERBOT_STRING", "")
+# --- 2. AYARLAR ---
+API_ID = int(os.environ.get("API_ID", "0"))
+API_HASH = os.environ.get("API_HASH", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+SESSION_STRING = os.environ.get("SESSION_STRING", "") 
+ADMINS = list(map(int, os.environ.get("ALLOWED_USERS", "").split(","))) if os.environ.get("ALLOWED_USERS") else []
+OWNER_CONTACT = "@yasin33" 
 
-# Admin user ID'leri
-ADMINS = list(map(int, os.environ.get("ADMINS", "").split(","))) if os.environ.get("ADMINS") else []
+# Başlangıç Zamanı
+START_TIME = time.time()
 
-# Bot client
-bot = Client("content_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# --- 3. DİL VE METİNLER ---
+TEXTS = {
+    "en": {
+        "welcome": "👋 **Welcome!**\nSelect your language:",
+        "menu": "🌟 **Dashboard**\n\n👤 ID: `{uid}`\n📊 Daily Limit: **{limit}/3**\n💎 VIP Status: {vip_status}\n\n📥 **Features:**\n1. Send Link -> Download Post\n2. `/story username` -> Download Stories (VIP)\n\n🆘 **Support:** `/help`",
+        "help_msg": (
+            "📚 **How to Use?**\n\n"
+            "1️⃣ **Restricted Content:**\n"
+            "• Send **Invite Link** (`t.me/+...`) first.\n"
+            "• Then send the post link.\n\n"
+            "2️⃣ **Story Saver (VIP):**\n"
+            "• Type `/story username` (e.g. `/story kimkardashian`)\n"
+            "• I will download all active stories.\n\n"
+            "💎 **Buy VIP:** Contact **{contact}**"
+        ),
+        "limit_reached": f"⛔ **Limit Reached!**\nContact **{OWNER_CONTACT}** to buy VIP.",
+        "vip_active": "✅ Active (Unlimited)",
+        "vip_inactive": "❌ Free Plan",
+        "queue": "⏳ **Queued (Wait 5s)...**",
+        "processing": "🔄 **Processing...**",
+        "downloading": "⬇️ **Downloading...**",
+        "uploading": "⬆️ **Uploading...**",
+        "story_search": "🔍 **Searching Stories for:** `{target}`...",
+        "story_found": "✅ Found **{count}** stories. Downloading...",
+        "story_none": "❌ No stories found or profile is private.",
+        "error_access": "❌ **Access Denied!** Send Invite Link first.",
+        "join_success": "✅ **Joined!** Now send the post link.",
+        "join_fail": "❌ Failed to join.",
+        "vip_only": "🔒 **VIP Only!**\nStories are for VIP members only."
+    }
+}
 
-# Userbot client - Session string kullanarak
-if USERBOT_STRING:
-    userbot = Client(
-        "userbot_session",
-        api_id=API_ID,
-        api_hash=API_HASH,
-        session_string=USERBOT_STRING
-    )
-else:
-    # Local test için session dosyası
-    userbot = Client("userbot", api_id=API_ID, api_hash=API_HASH)
+# --- 4. İSTEMCİLER ---
+bot = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-# Veritabanı başlatma
+# --- 5. VERİTABANI ---
 def init_db():
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (user_id INTEGER PRIMARY KEY, 
-                  is_vip INTEGER DEFAULT 0,
-                  daily_limit INTEGER DEFAULT 3,
-                  last_reset TEXT,
-                  total_scraped INTEGER DEFAULT 0)''')
-    conn.commit()
-    conn.close()
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
+    conn.execute('''CREATE TABLE IF NOT EXISTS users 
+                 (user_id INTEGER PRIMARY KEY, is_vip INTEGER DEFAULT 0, daily_limit INTEGER DEFAULT 3, last_reset TEXT, lang TEXT DEFAULT 'en')''')
+    conn.commit(); conn.close()
 
 def get_user(user_id):
-    conn = sqlite3.connect('users.db')
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     user = c.fetchone()
-    conn.close()
-    return user
-
-def add_or_update_user(user_id):
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
     today = datetime.now().strftime("%Y-%m-%d")
-    
-    user = get_user(user_id)
-    if user is None:
-        c.execute("INSERT INTO users (user_id, last_reset) VALUES (?, ?)", (user_id, today))
-    else:
-        # Günlük limit sıfırlama kontrolü
-        if user[3] != today and user[1] == 0:  # VIP değilse
-            c.execute("UPDATE users SET daily_limit=3, last_reset=? WHERE user_id=?", (today, user_id))
-    
-    conn.commit()
-    conn.close()
 
-def use_limit(user_id):
-    conn = sqlite3.connect('users.db')
+    if user is None:
+        c.execute("INSERT INTO users (user_id, last_reset, lang) VALUES (?, ?, ?)", (user_id, today, 'en'))
+        conn.commit(); conn.close(); return (user_id, 0, 3, today, 'en')
+    
+    if user[3] != today and user[1] == 0:
+        c.execute("UPDATE users SET daily_limit=3, last_reset=? WHERE user_id=?", (today, user_id))
+        conn.commit(); conn.close(); return (user_id, 0, 3, today, user[4])
+        
+    conn.close(); return user
+
+def update_lang(user_id, lang_code):
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
+    conn.execute("UPDATE users SET lang=? WHERE user_id=?", (lang_code, user_id))
+    conn.commit(); conn.close()
+
+def use_right(user_id):
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
+    conn.execute("UPDATE users SET daily_limit = daily_limit - 1 WHERE user_id=?", (user_id,))
+    conn.commit(); conn.close()
+
+def set_vip(user_id, status):
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
+    conn.execute("UPDATE users SET is_vip=? WHERE user_id=?", (status, user_id))
+    conn.commit(); conn.close()
+
+def get_stats():
+    conn = sqlite3.connect('musteri.db', check_same_thread=False)
     c = conn.cursor()
-    c.execute("UPDATE users SET daily_limit=daily_limit-1, total_scraped=total_scraped+1 WHERE user_id=?", (user_id,))
-    conn.commit()
+    c.execute("SELECT COUNT(*) FROM users")
+    total = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE is_vip=1")
+    vips = c.fetchone()[0]
     conn.close()
+    return total, vips
 
-def set_vip(user_id, is_vip):
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("UPDATE users SET is_vip=? WHERE user_id=?", (1 if is_vip else 0, user_id))
-    conn.commit()
-    conn.close()
+# --- 6. KOMUTLAR ---
 
-def get_remaining_limit(user_id):
-    user = get_user(user_id)
-    if user is None:
-        return 3
-    if user[1] == 1:  # VIP
-        return -1  # Sınırsız
-    return max(0, user[2])
-
-@bot.on_message(filters.command("start"))
-async def start_command(client, message: Message):
-    user_id = message.from_user.id
-    add_or_update_user(user_id)
+@bot.on(events.NewMessage(pattern='/start'))
+async def start(event):
+    uid = event.sender_id
+    u = get_user(uid)
     
-    user = get_user(user_id)
-    is_vip = user[1] == 1 if user else False
+    buttons = [
+        [Button.inline("🇺🇸 English", b"set_lang_en"), Button.inline("🇩🇪 Deutsch", b"set_lang_de")],
+        [Button.inline("🇹🇷 Türkçe", b"set_lang_tr")]
+    ]
+    await event.respond(TEXTS['en']['welcome'], buttons=buttons)
+
+@bot.on(events.CallbackQuery(pattern=b"set_lang_"))
+async def callback_handler(event):
+    lang_code = event.data.decode().split("_")[-1]
+    uid = event.sender_id
+    update_lang(uid, 'en') # Global standart
     
-    welcome_text = f"""
-👋 **Hoş geldin {message.from_user.first_name}!**
+    u = get_user(uid)
+    vip_status = TEXTS['en']['vip_active'] if u[1] == 1 else TEXTS['en']['vip_inactive']
+    msg = TEXTS['en']['menu'].format(uid=uid, limit=u[2], vip_status=vip_status)
+    await event.edit(msg)
 
-Bu bot ile iletim kapalı Telegram kanallarından ve gruplarından içerik çekebilirsin.
+@bot.on(events.NewMessage(pattern='/help'))
+async def help_cmd(event):
+    await event.respond(TEXTS['en']['help_msg'].format(contact=OWNER_CONTACT))
 
-⚡ **YENİ**: Hızlı kopyalama! İndir-yükle yok, direkt transfer! 🚀
+# --- ADMİN PANELİ ---
+@bot.on(events.NewMessage(pattern='/stats'))
+async def stats(event):
+    if event.sender_id not in ADMINS: return
+    total, vips = get_stats()
+    uptime = time.time() - START_TIME
+    msg = f"📊 **Stats**\nUsers: `{total}`\nVIPs: `{vips}`\nUptime: `{int(uptime//3600)}h {int((uptime%3600)//60)}m`"
+    await event.respond(msg)
 
-📊 **Senin Durumun:**
-{'🌟 **VIP Kullanıcısın** - Sınırsız ve bekleme süresiz erişim!' if is_vip else f'📝 Günlük limit: **{get_remaining_limit(user_id)}/3** içerik'}
+@bot.on(events.NewMessage(pattern='/killall'))
+async def killall(event):
+    if event.sender_id not in ADMINS: return
+    await event.respond("🔴 Restarting...")
+    os._exit(0)
 
-**Kullanım:**
-Sadece kanalın/grubun linkini veya username'ini gönder:
-• `https://t.me/kanal_adi/123`
-• `@kanal_adi` veya `@kanal_adi/123`
-
-**Komutlar:**
-/start - Bot'u başlat
-/stats - İstatistiklerini gör
-/help - Yardım
-
-{'🔧 **Admin Komutları:**\n/vip [user_id] - VIP ekle\n/unvip [user_id] - VIP kaldır' if user_id in ADMINS else ''}
-"""
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📚 Yardım", callback_data="help"),
-         InlineKeyboardButton("📊 İstatistikler", callback_data="stats")]
-    ])
-    
-    await message.reply_text(welcome_text, reply_markup=keyboard)
-
-@bot.on_message(filters.command("stats"))
-async def stats_command(client, message: Message):
-    user_id = message.from_user.id
-    user = get_user(user_id)
-    
-    if user is None:
-        await message.reply_text("❌ Önce /start komutunu kullan!")
-        return
-    
-    is_vip = user[1] == 1
-    total = user[4]
-    limit = get_remaining_limit(user_id)
-    
-    stats_text = f"""
-📊 **Senin İstatistiklerin**
-
-👤 Kullanıcı ID: `{user_id}`
-{'🌟 Durum: **VIP** (Sınırsız)' if is_vip else f'📝 Kalan günlük hak: **{limit}/3**'}
-📥 Toplam çekilen içerik: **{total}**
-
-{f'🔄 Limit sıfırlanma: **Yarın**' if not is_vip and limit < 3 else ''}
-"""
-    
-    await message.reply_text(stats_text)
-
-@bot.on_message(filters.command("help"))
-async def help_command(client, message: Message):
-    help_text = """
-📚 **Yardım - Nasıl Kullanılır?**
-
-**1️⃣ Link Gönder:**
-Telegram mesaj linkini direkt gönder:
-`https://t.me/kanal_adi/12345`
-
-**2️⃣ Username Gönder:**
-Kanal username'i ile:
-`@kanal_adi/12345`
-
-**3️⃣ Bot İşlemi Yapar:**
-⚡ Direkt kopyalar (saniyeler içinde!)
-✅ İndirme-yükleme yok
-✅ Maksimum hız
-
-**⚠️ Önemli Notlar:**
-• Bot kanala katılmadan çekebilir (çoğu durumda)
-• İletim engelli kanallarda da çalışır
-• Bazı çok gizli kanallar engelleyebilir
-
-**Limitler:**
-🆓 Ücretsiz: 3 içerik/gün (hızlı!)
-🌟 VIP: Sınırsız + bekleme yok (çok hızlı!)
-💎 Premium VIP: Sınırsız + bekleme yok (ultra hızlı!)
-"""
-    
-    await message.reply_text(help_text)
-
-@bot.on_message(filters.command("vip") & filters.user(ADMINS))
-async def vip_command(client, message: Message):
+@bot.on(events.NewMessage(pattern='/vip'))
+async def vip_add(event):
+    if event.sender_id not in ADMINS: return
     try:
-        parts = message.text.split()
-        if len(parts) < 2:
-            await message.reply_text("❌ Kullanım: /vip [user_id]")
+        t = int(event.message.text.split()[1])
+        set_vip(t, 1)
+        await event.respond(f"✅ {t} is VIP.")
+    except: await event.respond("Usage: `/vip ID`")
+
+@bot.on(events.NewMessage(pattern='/unvip'))
+async def vip_rem(event):
+    if event.sender_id not in ADMINS: return
+    try:
+        t = int(event.message.text.split()[1])
+        set_vip(t, 0)
+        await event.respond(f"❌ {t} is Normal.")
+    except: pass
+
+# --- YENİ: HİKAYE (STORY) İNDİRME ---
+@bot.on(events.NewMessage(pattern='/story'))
+async def story_downloader(event):
+    uid = event.sender_id
+    u = get_user(uid)
+    
+    # Sadece VIP ve Admin
+    if uid not in ADMINS and u[1] == 0:
+        await event.respond(TEXTS['en']['vip_only'])
+        return
+
+    try:
+        args = event.message.text.split()
+        if len(args) < 2:
+            await event.respond("⚠️ Usage: `/story username`\nExample: `/story elonmusk`")
             return
         
-        target_user_id = int(parts[1])
-        add_or_update_user(target_user_id)
-        set_vip(target_user_id, True)
+        target = args[1].replace("@", "")
+        status = await event.respond(TEXTS['en']['story_search'].format(target=target))
         
-        await message.reply_text(f"✅ Kullanıcı {target_user_id} VIP yapıldı!")
-        
+        # Userbot ile entityi bul
         try:
-            await bot.send_message(target_user_id, 
-                "🌟 **Tebrikler!** VIP kullanıcı oldun!\n\n"
-                "Artık sınırsız ve bekleme süresiz içerik çekebilirsin! 🚀")
+            entity = await userbot.get_entity(target)
         except:
-            pass
+            await status.edit("❌ User not found.")
+            return
+
+        # Storyleri Çek
+        stories = await userbot(functions.stories.GetPeerStoriesRequest(peer=entity))
+        
+        if not stories.stories:
+            await status.edit(TEXTS['en']['story_none'])
+            return
             
-    except ValueError:
-        await message.reply_text("❌ Geçerli bir user ID gir!")
-    except Exception as e:
-        await message.reply_text(f"❌ Hata: {str(e)}")
-
-@bot.on_message(filters.command("unvip") & filters.user(ADMINS))
-async def unvip_command(client, message: Message):
-    try:
-        parts = message.text.split()
-        if len(parts) < 2:
-            await message.reply_text("❌ Kullanım: /unvip [user_id]")
-            return
+        await status.edit(TEXTS['en']['story_found'].format(count=len(stories.stories)))
         
-        target_user_id = int(parts[1])
-        set_vip(target_user_id, False)
-        
-        await message.reply_text(f"✅ Kullanıcı {target_user_id} VIP'liği kaldırıldı!")
-        
-    except ValueError:
-        await message.reply_text("❌ Geçerli bir user ID gir!")
-    except Exception as e:
-        await message.reply_text(f"❌ Hata: {str(e)}")
-
-@bot.on_message(filters.text & filters.private & ~filters.command(["start", "help", "stats", "vip", "unvip"]))
-async def handle_link(client, message: Message):
-    user_id = message.from_user.id
-    add_or_update_user(user_id)
-    
-    user = get_user(user_id)
-    is_vip = user[1] == 1 if user else False
-    remaining = get_remaining_limit(user_id)
-    
-    # Limit kontrolü
-    if not is_vip and remaining <= 0:
-        await message.reply_text(
-            "❌ **Günlük limitin doldu!**\n\n"
-            "Yarın tekrar 3 hakkın olacak.\n"
-            "Veya sınırsız erişim için VIP ol! 🌟"
-        )
-        return
-    
-    # Link parse etme
-    text = message.text.strip()
-    
-    try:
-        # Link formatını parse et
-        if "t.me/" in text:
-            parts = text.split("t.me/")[1].split("/")
-            if parts[0].startswith("c/"):
-                # Private channel link: t.me/c/1234567/123
-                channel_id = int("-100" + parts[1])
-                msg_id = int(parts[2]) if len(parts) > 2 else None
-            else:
-                # Public channel: t.me/channel/123
-                channel = parts[0]
-                msg_id = int(parts[1]) if len(parts) > 1 else None
-                channel_id = None
-        elif text.startswith("@"):
-            parts = text[1:].split("/")
-            channel = parts[0]
-            msg_id = int(parts[1]) if len(parts) > 1 else None
-            channel_id = None
-        else:
-            await message.reply_text("❌ Geçersiz format! Örnek:\n`https://t.me/kanal/123` veya `@kanal/123`")
-            return
-        
-        if msg_id is None:
-            await message.reply_text("❌ Mesaj ID'si bulunamadı! Tam linki gönder.")
-            return
-        
-        status_msg = await message.reply_text("⚡ Hızlı kopyalama başlatılıyor...")
-        
-        # VIP değilse bekleme süresi ekle
-        if not is_vip:
-            await asyncio.sleep(2)  # 2 saniye (daha hızlı!)
-        
-        try:
-            # Kanal ID'sini al
-            if channel_id is None:
+        count = 0
+        for story in stories.stories:
+            if story.media:
                 try:
-                    chat = await userbot.get_chat(channel)
-                    channel_id = chat.id
-                except:
-                    # Katıl ve tekrar dene
-                    await userbot.join_chat(channel)
-                    chat = await userbot.get_chat(channel)
-                    channel_id = chat.id
-            
-            # YÖNTEM 1: Direkt copy_message (EN HIZLI!) 🚀
-            try:
-                copied = await userbot.copy_message(
-                    chat_id=user_id,
-                    from_chat_id=channel_id,
-                    message_id=msg_id
-                )
-                
-                # Limiti düşür
-                if not is_vip:
-                    use_limit(user_id)
-                    remaining -= 1
-                
-                # Başarı mesajı
-                success_caption = f"✅ İçerik kopyalandı!\n⚡ Hızlı transfer tamamlandı!\n\n"
-                if not is_vip:
-                    success_caption += f"📝 Kalan hakkın: {remaining}/3"
-                
-                await bot.send_message(user_id, success_caption)
-                await status_msg.delete()
-                
-            except ChatForwardsRestricted:
-                # YÖNTEM 2: İletim kapalıysa, indirip yeniden yükle (eski yöntem)
-                await status_msg.edit_text("📥 İletim engelli, medya indiriliyor...")
-                
-                msg = await userbot.get_messages(channel_id, msg_id)
-                
-                if msg is None:
-                    await status_msg.edit_text("❌ Mesaj bulunamadı!")
-                    return
-                
-                # Limiti düşür
-                if not is_vip:
-                    use_limit(user_id)
-                    remaining -= 1
-                
-                # İçeriği gönder
-                caption = f"✅ İçerik çekildi!\n⚠️ İletim kapalıydı, medya yeniden yüklendi.\n\n"
-                if not is_vip:
-                    caption += f"📝 Kalan hakkın: {remaining}/3"
-                
-                if msg.text:
-                    await message.reply_text(msg.text + "\n\n" + caption)
-                elif msg.photo:
-                    await status_msg.edit_text("📥 Fotoğraf indiriliyor...")
-                    await message.reply_photo(msg.photo.file_id, caption=msg.caption or caption)
-                elif msg.video:
-                    await status_msg.edit_text("📥 Video indiriliyor...")
-                    await message.reply_video(msg.video.file_id, caption=msg.caption or caption)
-                elif msg.document:
-                    await status_msg.edit_text("📥 Dosya indiriliyor...")
-                    await message.reply_document(msg.document.file_id, caption=msg.caption or caption)
-                elif msg.audio:
-                    await status_msg.edit_text("📥 Ses dosyası indiriliyor...")
-                    await message.reply_audio(msg.audio.file_id, caption=msg.caption or caption)
-                elif msg.voice:
-                    await message.reply_voice(msg.voice.file_id, caption=caption)
-                elif msg.sticker:
-                    await message.reply_sticker(msg.sticker.file_id)
-                    await message.reply_text(caption)
-                elif msg.animation:
-                    await message.reply_animation(msg.animation.file_id, caption=caption)
-                else:
-                    await message.reply_text(f"✅ Mesaj çekildi ama desteklenmeyen format.\n\n{caption}")
-                
-                await status_msg.delete()
-                
-        except UserNotParticipant:
-            await status_msg.edit_text("❌ Kanala erişim yok. Kanal çok gizli olabilir.")
-        except ChannelPrivate:
-            await status_msg.edit_text("❌ Bu kanal özel, userbot erişemiyor.")
-        except FloodWait as e:
-            await status_msg.edit_text(f"⏳ Telegram flood koruması: {e.value} saniye bekle.")
-        except Exception as e:
-            await status_msg.edit_text(f"❌ Hata: {str(e)}")
-            
+                    path = await userbot.download_media(story.media)
+                    await bot.send_file(event.chat_id, path, caption=f"📹 Story from @{target}")
+                    os.remove(path)
+                    count += 1
+                except: continue
+        
+        await status.delete()
+        await event.respond(f"✅ **Done!** Downloaded {count} stories.")
+
     except Exception as e:
-        await message.reply_text(f"❌ Link parse edilemedi: {str(e)}")
+        await event.respond(f"❌ Error: {e}")
 
-@bot.on_callback_query()
-async def callback_handler(client, callback_query):
-    data = callback_query.data
+# --- TEKİL İNDİRME (RESTRICTED CONTENT) ---
+@bot.on(events.NewMessage)
+async def downloader(event):
+    if not event.is_private or event.message.text.startswith('/'): return
     
-    if data == "help":
-        await callback_query.message.edit_text("""
-📚 **Yardım - Nasıl Kullanılır?**
-
-**1️⃣ Link Gönder:**
-Telegram mesaj linkini direkt gönder:
-`https://t.me/kanal_adi/12345`
-
-**2️⃣ Username Gönder:**
-Kanal username'i ile:
-`@kanal_adi/12345`
-
-**3️⃣ Bot İşlemi Yapar:**
-⚡ Direkt kopyalar (saniyeler içinde!)
-✅ İndirme-yükleme yok
-✅ Maksimum hız
-
-**Özellikler:**
-• İletim açıksa: ⚡ Anında kopyalama
-• İletim kapalıysa: 📥 Medya indirme modu
-""")
-    elif data == "stats":
-        user_id = callback_query.from_user.id
-        user = get_user(user_id)
-        
-        if user is None:
-            await callback_query.answer("Önce /start komutunu kullan!", show_alert=True)
+    uid = event.sender_id
+    u = get_user(uid)
+    vip = u[1] == 1
+    limit = u[2]
+    
+    if uid not in ADMINS and not vip:
+        if limit <= 0:
+            await event.respond(TEXTS['en']['limit_reached'])
             return
-        
-        is_vip = user[1] == 1
-        total = user[4]
-        limit = get_remaining_limit(user_id)
-        
-        stats_text = f"""
-📊 **Senin İstatistiklerin**
+        status = await event.respond(TEXTS['en']['queue'])
+        await asyncio.sleep(4)
+    else:
+        status = await event.respond(TEXTS['en']['processing'])
 
-👤 Kullanıcı ID: `{user_id}`
-{'🌟 Durum: **VIP** (Sınırsız)' if is_vip else f'📝 Kalan günlük hak: **{limit}/3**'}
-📥 Toplam çekilen içerik: **{total}**
-"""
-        
-        await callback_query.message.edit_text(stats_text)
-    
-    await callback_query.answer()
+    text = event.message.text.strip()
 
-async def main():
+    try:
+        # A) DAVET LİNKİ
+        if "t.me/+" in text or "joinchat" in text:
+            try:
+                await userbot(ImportChatInviteRequest(text.split('+')[-1]))
+                await status.edit(TEXTS['en']['join_success'])
+            except UserAlreadyParticipantError:
+                await status.edit(TEXTS['en']['join_success'])
+            except:
+                await status.edit(TEXTS['en']['join_fail'])
+            return
+
+        # B) İÇERİK
+        if "t.me/" not in text:
+            await status.edit("❌ Invalid Link."); return
+
+        try:
+            parts = text.rstrip('/').split('/')
+            msg_id = int(parts[-1])
+            if 't.me/c/' in text: entity = await userbot.get_entity(int('-100' + parts[-2]))
+            else: entity = await userbot.get_entity(parts[-2])
+            
+            msg = await userbot.get_messages(entity, ids=msg_id)
+        except:
+            await status.edit(TEXTS['en']['error_access']); return
+
+        if not msg or not msg.media:
+            await status.edit("❌ No Media."); return
+
+        await status.edit(TEXTS['en']['downloading'])
+        path = await userbot.download_media(msg)
+        
+        await status.edit(TEXTS['en']['uploading'])
+        await bot.send_file(event.chat_id, path, caption=msg.text or "")
+        
+        if os.path.exists(path): os.remove(path)
+        
+        if uid not in ADMINS and not vip: use_right(uid)
+        
+        await status.delete()
+
+    except Exception as e:
+        await status.edit(f"❌ Error: {e}")
+        if 'path' in locals() and path and os.path.exists(path): os.remove(path)
+
+# --- BAŞLATMA ---
+def main():
     init_db()
-    
-    # Her iki client'ı da başlat
-    await bot.start()
-    await userbot.start()
-    
-    me = await userbot.get_me()
-    print("✅ Bot ve Userbot başlatıldı!")
-    print(f"🤖 Bot username: @{(await bot.get_me()).username}")
-    print(f"👤 Userbot: {me.first_name} (@{me.username})")
-    print(f"⚡ Hızlı kopyalama modu aktif!")
-    
-    # Botu çalışır durumda tut
-    await asyncio.Event().wait()
+    threading.Thread(target=run_web).start()
+    print("🚀 Commercial Bot Active!")
+    userbot.start()
+    bot.run_until_disconnected()
 
-if __name__ == "__main__":
-    bot.run(main())
+if __name__ == '__main__':
+    main()
