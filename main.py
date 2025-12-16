@@ -29,7 +29,7 @@ OWNER_CONTACT = "@yasin33"
 
 START_TIME = time.time()
 
-# --- 3. DİL VE METİNLER (KONUŞKAN MOD) ---
+# --- 3. DİL VE METİNLER ---
 TEXTS = {
     "en": {
         "welcome": "👋 **Welcome!**\nSelect Language:",
@@ -48,14 +48,14 @@ TEXTS = {
         "vip_only": "🔒 **VIP Feature Only!**",
         "left_channel": "👋 **Left the channel.**",
         
-        # --- HİKAYE MESAJLARI ---
-        "story_search": "🔍 **Searching Stories for:** `@{target}`...",
-        "story_found": "✅ **{count}** stories found. Starting download...",
-        "story_dl_status": "⬇️ Downloading Story {current}/{total}...",
+        # --- HİKAYE MESAJLARI (GÜNCELLENDİ) ---
+        "story_search": "🔍 **Searching Stories:** `@{target}`...",
+        "story_found": "✅ **{count}** stories found. Downloading...",
+        "story_dl_status": "⬇️ Downloading {current}/{total}...",
         "story_none": "❌ **No Stories Found.**\nProfile might be private or no active stories.",
         "story_done": "🏁 **All Stories Sent!**",
+        "story_hidden": "❌ **Hidden Profile.**\nI cannot see stories of this user (Private Account).",
         
-        "restart_msg": "🔴 **System Restarting...**\nPlease wait 30 seconds before sending commands.",
         "vip_promoted": "🌟 **You are now VIP!**",
         "vip_removed": "❌ **VIP Removed.**"
     },
@@ -81,8 +81,8 @@ TEXTS = {
         "story_dl_status": "⬇️ Lade Story {current}/{total}...",
         "story_none": "❌ **Keine Stories.**\nProfil ist privat oder leer.",
         "story_done": "🏁 **Fertig!**",
+        "story_hidden": "❌ **Privates Profil.**",
         
-        "restart_msg": "🔴 **Neustart...**\nBitte warten Sie 30 Sekunden.",
         "vip_promoted": "🌟 **Sie sind jetzt VIP!**",
         "vip_removed": "❌ **VIP entfernt.**"
     },
@@ -108,8 +108,8 @@ TEXTS = {
         "story_dl_status": "⬇️ İndiriliyor: {current}/{total}...",
         "story_none": "❌ **Hikaye Bulunamadı.**\nProfil gizli olabilir veya hikaye atmamış.",
         "story_done": "🏁 **Tüm Hikayeler Gönderildi!**",
+        "story_hidden": "❌ **Gizli Profil.**\nBu kullanıcının hikayelerini göremiyorum.",
         
-        "restart_msg": "🔴 **Sistem Yeniden Başlatılıyor...**\nLütfen 30 saniye bekleyin.",
         "vip_promoted": "🌟 **Artık VIP Üyesiniz!**",
         "vip_removed": "❌ **VIP İptal Edildi.**"
     }
@@ -174,7 +174,6 @@ def get_stats():
 async def start(event):
     uid = event.sender_id
     u = get_user(uid)
-    
     buttons = [
         [Button.inline("🇺🇸 English", b"set_lang_en"), Button.inline("🇩🇪 Deutsch", b"set_lang_de")],
         [Button.inline("🇹🇷 Türkçe", b"set_lang_tr")]
@@ -185,16 +184,13 @@ async def start(event):
 async def callback_handler(event):
     lang_code = event.data.decode().split("_")[-1] 
     uid = event.sender_id
-    
-    update_lang(uid, lang_code) # ARTIK DİLİ KAYDEDİYOR
-    
+    update_lang(uid, lang_code)
     u = get_user(uid)
     vip = u[1] == 1
     
     if uid in ADMINS: msg = TEXTS[lang_code]['menu_admin']
     elif vip: msg = TEXTS[lang_code]['menu_vip'].format(uid=uid)
     else: msg = TEXTS[lang_code]['menu_free'].format(uid=uid, limit=u[2], contact=OWNER_CONTACT)
-        
     await event.edit(msg)
 
 @bot.on(events.NewMessage(pattern='/help'))
@@ -214,11 +210,8 @@ async def stats(event):
 @bot.on(events.NewMessage(pattern='/killall'))
 async def killall(event):
     if event.sender_id not in ADMINS: return
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4]
-    await event.respond(TEXTS[lang]['restart_msg']) # Uyarı veriyor
-    os._exit(0) # Restart atıyor
+    await event.respond("🔴 Restarting...")
+    os._exit(0)
 
 @bot.on(events.NewMessage(pattern='/vip'))
 async def vip_add(event):
@@ -226,6 +219,7 @@ async def vip_add(event):
     try:
         t = int(event.message.text.split()[1])
         set_vip(t, 1)
+        await bot.send_message(t, TEXTS['en']['vip_promoted'])
         await event.respond(f"✅ {t} VIP.")
     except: await event.respond("Usage: `/vip ID`")
 
@@ -252,7 +246,7 @@ async def leave_channel(event):
 
 # --- 8. VIP ÖZELLİKLERİ ---
 
-# A) HİKAYE (STORY) - DÜZELTİLDİ
+# A) HİKAYE (DÜZELTİLMİŞ VE MODERN)
 @bot.on(events.NewMessage(pattern='/story'))
 async def story_dl(event):
     uid = event.sender_id
@@ -272,36 +266,37 @@ async def story_dl(event):
         target = args[1].replace("@", "")
         status = await event.respond(TEXTS[lang]['story_search'].format(target=target))
         
-        # Kullanıcıyı bul
         try: 
+            # Kullanıcı adından entity al
             entity = await userbot.get_entity(target)
         except: 
-            await status.edit(TEXTS[lang]['story_none']) # Bulamazsa buraya düşer
-            return
-
-        # Storyleri çek (Gizli profilleri yakalamak için try-except)
-        try:
-            stories = await userbot(functions.stories.GetPeerStoriesRequest(peer=entity))
-        except:
-            await status.edit(TEXTS[lang]['story_none']) # Gizliyse buraya düşer
-            return
-            
-        if not stories.stories: 
             await status.edit(TEXTS[lang]['story_none'])
             return
+
+        # YENİ YÖNTEM: Telethon'un modern listeleme özelliği
+        # get_stories direkt iterable (liste gibi) döner, PeerStories nesnesiyle uğraşmaz.
+        all_stories = []
+        try:
+            # Sadece aktif storyleri çek
+            stories = await userbot.get_stories(entity)
+            if not stories:
+                await status.edit(TEXTS[lang]['story_none'])
+                return
+            all_stories = stories
+        except Exception as e:
+            # Eğer hesap gizliyse burada patlar
+            await status.edit(TEXTS[lang]['story_hidden'])
+            return
             
-        total_stories = len(stories.stories)
-        await status.edit(TEXTS[lang]['story_found'].format(count=total_stories))
+        await status.edit(TEXTS[lang]['story_found'].format(count=len(all_stories)))
         
         count = 0
-        for i, story in enumerate(stories.stories):
+        for i, story in enumerate(all_stories):
             if story.media:
                 try:
-                    # Canlı Durum Güncellemesi
-                    await status.edit(TEXTS[lang]['story_dl_status'].format(current=i+1, total=total_stories))
-                    
+                    await status.edit(TEXTS[lang]['story_dl_status'].format(current=i+1, total=len(all_stories)))
                     path = await userbot.download_media(story.media)
-                    await bot.send_file(event.chat_id, path, caption=f"📹 Story {i+1}/{total_stories} - @{target}")
+                    await bot.send_file(event.chat_id, path, caption=f"📹 Story {i+1} - @{target}")
                     os.remove(path)
                     count += 1
                 except: continue
@@ -310,7 +305,7 @@ async def story_dl(event):
         await event.respond(TEXTS[lang]['story_done'])
 
     except Exception as e: 
-        await event.respond(f"❌ Error: {e}")
+        await event.respond(f"❌ Error: {str(e)}")
 
 # B) RANGE DOWNLOAD
 @bot.on(events.NewMessage(pattern='/range'))
@@ -321,7 +316,7 @@ async def range_dl(event):
     if uid not in ADMINS and u[1] == 0:
         await event.respond(TEXTS[lang]['vip_only'])
         return
-    # Range kodları (Kısaltıldı, yapı aynı)
+    # Range kodları (Kısaltıldı)
     await event.respond("Range Active.")
 
 # C) TRANSFER
@@ -333,7 +328,6 @@ async def transfer_dl(event):
     if uid not in ADMINS and u[1] == 0:
         await event.respond(TEXTS[lang]['vip_only'])
         return
-    # Transfer kodları
     await event.respond("Transfer Active.")
 
 
@@ -346,7 +340,6 @@ async def downloader(event):
     u = get_user(uid)
     vip = u[1] == 1
     limit = u[2]
-    # DİL HATASI BURADA DÜZELTİLDİ: Artık veritabanındaki dili okuyor
     lang = u[4] if u[4] in TEXTS else 'en'
     
     if uid not in ADMINS:
