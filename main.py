@@ -10,6 +10,7 @@ from telethon import TelegramClient, events, Button, functions
 from telethon.sessions import StringSession
 from telethon.tl.functions.messages import ImportChatInviteRequest
 from telethon.tl.functions.channels import LeaveChannelRequest
+from telethon.tl.functions.contacts import AddContactRequest, DeleteContactsRequest
 from telethon.errors import FloodWaitError, UserAlreadyParticipantError
 from flask import Flask
 
@@ -48,16 +49,16 @@ TEXTS = {
         "vip_only": "🔒 **VIP Feature Only!**",
         "left_channel": "👋 **Left the channel.**",
         
-        # --- HİKAYE MESAJLARI (GÜNCELLENDİ) ---
         "story_search": "🔍 **Searching Stories:** `@{target}`...",
         "story_found": "✅ **{count}** stories found. Downloading...",
         "story_dl_status": "⬇️ Downloading {current}/{total}...",
         "story_none": "❌ **No Stories Found.**\nProfile might be private or no active stories.",
+        "story_retry": "🔓 **Profile Hidden.** Trying to bypass privacy settings...",
         "story_done": "🏁 **All Stories Sent!**",
-        "story_hidden": "❌ **Hidden Profile.**\nI cannot see stories of this user (Private Account).",
         
         "vip_promoted": "🌟 **You are now VIP!**",
-        "vip_removed": "❌ **VIP Removed.**"
+        "vip_removed": "❌ **VIP Removed.**",
+        "restart_msg": "🔴 **System Restarting...**"
     },
     "de": {
         "welcome": "👋 **Willkommen!**\nSprache wählen:",
@@ -80,11 +81,12 @@ TEXTS = {
         "story_found": "✅ **{count}** Stories gefunden. Starte Download...",
         "story_dl_status": "⬇️ Lade Story {current}/{total}...",
         "story_none": "❌ **Keine Stories.**\nProfil ist privat oder leer.",
+        "story_retry": "🔓 **Profil Privat.** Versuche Zugriff zu erhalten...",
         "story_done": "🏁 **Fertig!**",
-        "story_hidden": "❌ **Privates Profil.**",
         
         "vip_promoted": "🌟 **Sie sind jetzt VIP!**",
-        "vip_removed": "❌ **VIP entfernt.**"
+        "vip_removed": "❌ **VIP entfernt.**",
+        "restart_msg": "🔴 **Neustart...**"
     },
     "tr": {
         "welcome": "👋 **Hoş Geldiniz!**\nDil seçiniz:",
@@ -106,12 +108,13 @@ TEXTS = {
         "story_search": "🔍 **Hikayeler Aranıyor:** `@{target}`...",
         "story_found": "✅ **{count}** hikaye bulundu. İndiriliyor...",
         "story_dl_status": "⬇️ İndiriliyor: {current}/{total}...",
-        "story_none": "❌ **Hikaye Bulunamadı.**\nProfil gizli olabilir veya hikaye atmamış.",
+        "story_none": "❌ **Hikaye Bulunamadı.**\nProfil 'Sadece Kişilerim'e açık olabilir veya hikayesi yok.",
+        "story_retry": "🔓 **Profil Gizli.** Rehbere ekleyip deneniyor...",
         "story_done": "🏁 **Tüm Hikayeler Gönderildi!**",
-        "story_hidden": "❌ **Gizli Profil.**\nBu kullanıcının hikayelerini göremiyorum.",
         
         "vip_promoted": "🌟 **Artık VIP Üyesiniz!**",
-        "vip_removed": "❌ **VIP İptal Edildi.**"
+        "vip_removed": "❌ **VIP İptal Edildi.**",
+        "restart_msg": "🔴 **Sistem Yeniden Başlatılıyor...**"
     }
 }
 
@@ -210,7 +213,10 @@ async def stats(event):
 @bot.on(events.NewMessage(pattern='/killall'))
 async def killall(event):
     if event.sender_id not in ADMINS: return
-    await event.respond("🔴 Restarting...")
+    uid = event.sender_id
+    u = get_user(uid)
+    lang = u[4]
+    await event.respond(TEXTS[lang]['restart_msg'])
     os._exit(0)
 
 @bot.on(events.NewMessage(pattern='/vip'))
@@ -246,7 +252,7 @@ async def leave_channel(event):
 
 # --- 8. VIP ÖZELLİKLERİ ---
 
-# A) HİKAYE (DÜZELTİLMİŞ VE MODERN)
+# A) HİKAYE (REHBERE EKLEME ÖZELLİKLİ)
 @bot.on(events.NewMessage(pattern='/story'))
 async def story_dl(event):
     uid = event.sender_id
@@ -266,35 +272,39 @@ async def story_dl(event):
         target = args[1].replace("@", "")
         status = await event.respond(TEXTS[lang]['story_search'].format(target=target))
         
-        try: 
-            # Kullanıcı adından entity al
+        try:
             entity = await userbot.get_entity(target)
-        except: 
+        except:
             await status.edit(TEXTS[lang]['story_none'])
             return
 
-        # YENİ YÖNTEM: Telethon'un modern listeleme özelliği
-        # get_stories direkt iterable (liste gibi) döner, PeerStories nesnesiyle uğraşmaz.
-        all_stories = []
+        # 1. Deneme: Normal çekmeyi dene
         try:
-            # Sadece aktif storyleri çek
             stories = await userbot.get_stories(entity)
-            if not stories:
-                await status.edit(TEXTS[lang]['story_none'])
-                return
-            all_stories = stories
-        except Exception as e:
-            # Eğer hesap gizliyse burada patlar
-            await status.edit(TEXTS[lang]['story_hidden'])
+        except:
+            stories = []
+
+        # 2. Deneme: Eğer boşsa REHBERE EKLE ve tekrar dene
+        if not stories:
+            await status.edit(TEXTS[lang]['story_retry'])
+            try:
+                # Userbot rehberine ekle (Fake bir isimle)
+                await userbot(AddContactRequest(id=entity, first_name="Story", last_name="Target", phone="", add_phone_privacy_exception=False))
+                await asyncio.sleep(2) # Telegram'ın işlemesi için bekle
+                stories = await userbot.get_stories(entity)
+            except: pass
+
+        if not stories: 
+            await status.edit(TEXTS[lang]['story_none'])
             return
             
-        await status.edit(TEXTS[lang]['story_found'].format(count=len(all_stories)))
+        await status.edit(TEXTS[lang]['story_found'].format(count=len(stories)))
         
         count = 0
-        for i, story in enumerate(all_stories):
+        for i, story in enumerate(stories):
             if story.media:
                 try:
-                    await status.edit(TEXTS[lang]['story_dl_status'].format(current=i+1, total=len(all_stories)))
+                    await status.edit(TEXTS[lang]['story_dl_status'].format(current=i+1, total=len(stories)))
                     path = await userbot.download_media(story.media)
                     await bot.send_file(event.chat_id, path, caption=f"📹 Story {i+1} - @{target}")
                     os.remove(path)
@@ -303,6 +313,10 @@ async def story_dl(event):
         
         await status.delete()
         await event.respond(TEXTS[lang]['story_done'])
+        
+        # (Opsiyonel: İş bitince rehberden silmek istersen burayı açabilirsin)
+        # try: await userbot(DeleteContactsRequest(id=[entity]))
+        # except: pass
 
     except Exception as e: 
         await event.respond(f"❌ Error: {str(e)}")
@@ -316,7 +330,6 @@ async def range_dl(event):
     if uid not in ADMINS and u[1] == 0:
         await event.respond(TEXTS[lang]['vip_only'])
         return
-    # Range kodları (Kısaltıldı)
     await event.respond("Range Active.")
 
 # C) TRANSFER
