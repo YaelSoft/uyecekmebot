@@ -4,43 +4,40 @@ import threading
 import sqlite3
 import time
 import sys
+import logging
 from datetime import datetime
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
 from telethon.tl.functions.messages import ImportChatInviteRequest
 from telethon.tl.functions.channels import LeaveChannelRequest, GetParticipantRequest
-from telethon.tl.types import Channel
-from telethon.errors import FloodWaitError, UserAlreadyParticipantError, UserNotParticipantError
+from telethon.errors import FloodWaitError
 from flask import Flask
 
-# --- 1. RENDER WEB SUNUCUSU ---
+# --- 1. DETAYLI LOGLAMA (Artık Render Console'da Her Şeyi Göreceksin) ---
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# --- 2. RENDER WEB SUNUCUSU ---
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver V6.0 (Debug Mode) Active!"
+def home(): return "YaelSaver V7.0 (Brute Force Mode) Active!"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
-# --- 2. AYARLAR ---
+# --- 3. AYARLAR ---
 API_ID = int(os.environ.get("API_ID", "0"))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 ADMINS = list(map(int, os.environ.get("ALLOWED_USERS", "").split(","))) if os.environ.get("ALLOWED_USERS") else []
-OWNER_CONTACT = "@yasin33" 
-
-FSUB_CHANNEL = os.environ.get("FSUB_CHANNEL", "") 
-
-# --- 3. METİNLER ---
-TEXTS = {
-    "en": {"vip_only": "🔒 **VIP Only!**", "processing": "🔄 **Processing...**"},
-    "tr": {"vip_only": "🔒 **Sadece VIP!**", "processing": "🔄 **İşleniyor...**"}
-}
-def get_text(lang, key): return TEXTS.get(lang, TEXTS['en']).get(key, "")
 
 # --- 4. İSTEMCİLER ---
 bot = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-# --- 5. VERİTABANI (Basitleştirildi) ---
+# --- 5. VERİTABANI (Basit) ---
 def init_db():
     conn = sqlite3.connect('musteri.db', check_same_thread=False)
     conn.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, is_vip INTEGER DEFAULT 0, lang TEXT DEFAULT 'en')''')
@@ -60,7 +57,7 @@ def set_vip(user_id, status):
     conn.execute("UPDATE users SET is_vip=? WHERE user_id=?", (status, user_id))
     conn.commit(); conn.close()
 
-# --- 6. LINK ÇÖZÜCÜ (PRO VERSİYON) ---
+# --- 6. LINK ÇÖZÜCÜ (Kategori Ayıklayıcı) ---
 async def get_entity_and_topic(link):
     parts = link.rstrip('/').split('/')
     topic_id = None
@@ -76,9 +73,9 @@ async def get_entity_and_topic(link):
             
             # Topic ID Kontrolü
             if len(parts) > c_index + 2 and parts[-1].isdigit() and parts[-2].isdigit():
-                 topic_id = int(parts[-2]) # .../TOPIC/MSG_ID
+                 topic_id = int(parts[-2]) 
             elif parts[-1].isdigit() and str(parts[-1]) != channel_id_part:
-                 topic_id = int(parts[-1]) # .../TOPIC
+                 topic_id = int(parts[-1])
         else:
             username = parts[parts.index('t.me') + 1]
             entity = await userbot.get_entity(username)
@@ -86,11 +83,11 @@ async def get_entity_and_topic(link):
             
         if hasattr(entity, 'title'): entity_name = entity.title
     except Exception as e:
-        print(f"Link Çözme Hatası: {e}")
+        logger.error(f"Link Çözme Hatası: {e}")
         
     return entity, topic_id, entity_name
 
-# --- 7. TRANSFER (DEBUG MODLU) ---
+# --- 7. TRANSFER (BRUTE FORCE ID MODE) ---
 @bot.on(events.NewMessage(pattern='/transfer'))
 async def transfer_dl(event):
     uid = event.sender_id
@@ -98,85 +95,112 @@ async def transfer_dl(event):
     if uid not in ADMINS and u[1] == 0: await event.respond("🔒 VIP Only"); return
     
     try:
-        # Komut: /transfer [Kaynak] [Hedef] [Adet]
         args = event.message.text.split()
         src_link = args[1]
         dst_link = args[2]
         limit = min(int(args[3]), 100000)
         
-        status = await event.respond(f"🕵️‍♂️ **Analiz Başlatılıyor...**\n`{src_link}` inceleniyor.")
+        status = await event.respond(f"⚙️ **Sistem Başlatılıyor...**\nLoglar kontrol ediliyor.")
 
-        # 1. Kaynak ve Hedefi Çöz
+        # 1. Kaynak ve Hedef
         src_entity, src_topic, src_name = await get_entity_and_topic(src_link)
         dst_entity, dst_topic, dst_name = await get_entity_and_topic(dst_link)
         
         if not src_entity or not dst_entity:
-            await status.edit("❌ **HATA:** Gruplardan birine erişilemedi. Userbot üye mi?")
+            await status.edit("❌ **HATA:** Gruplara erişilemedi. Userbot üye mi?")
             return
 
-        # 2. Durum Raporu (Kullanıcı görsün diye)
-        src_type = f"📂 TEK TOPIC ({src_topic})" if src_topic else "🌍 TÜM GRUP (Komple)"
-        dst_type = f"📂 HEDEF TOPIC ({dst_topic})" if dst_topic else "🌍 HEDEF ANA SAYFA"
-        
-        await status.edit(
-            f"✅ **Analiz Tamam!**\n\n"
-            f"📤 **Kaynak:** {src_name}\n"
-            f"ℹ️ **Mod:** {src_type}\n"
-            f"📥 **Hedef:** {dst_name}\n"
-            f"🎯 **Nereye:** {dst_type}\n\n"
-            f"🚀 **Transfer Başlıyor...**"
-        )
+        # 2. Mod Seçimi (Topic varsa Normal, Yoksa Brute Force)
+        mode = "NORMAL"
+        if src_topic is None:
+            mode = "BRUTE FORCE (ID Tarama)"
+        else:
+            mode = f"TOPIC MODU (ID: {src_topic})"
 
-        # 3. İŞLEM DÖNGÜSÜ
+        await status.edit(
+            f"✅ **Hedef Kilitlendi!**\n\n"
+            f"📤 **Kaynak:** {src_name}\n"
+            f"🛠 **Yöntem:** {mode}\n"
+            f"📥 **Hedef:** {dst_name} (Topic: {dst_topic or 'Yok'})\n"
+            f"📊 **Hedeflenen:** {limit} Mesaj\n\n"
+            f"🚀 **İşlem Başlıyor...**"
+        )
+        logger.info(f"Transfer Başladı: {src_name} -> {dst_name} | Limit: {limit} | Mod: {mode}")
+
         count = 0
         skipped = 0
         
-        # Mantık: Eğer src_topic YOKSA (None), reply_to parametresini hiç verme.
-        # Bu sayede Telethon tüm mesajları çeker.
+        # --- A) NORMAL MOD (Eğer Topic ID varsa - Kategori belliyse) ---
         if src_topic:
-            iterator = userbot.iter_messages(src_entity, limit=limit, reply_to=src_topic)
+            async for msg in userbot.iter_messages(src_entity, limit=limit, reply_to=src_topic):
+                if msg.media:
+                    try:
+                        await userbot.send_message(dst_entity, file=msg.media, message="", reply_to=dst_topic)
+                        count += 1
+                        await asyncio.sleep(1.5)
+                        if count % 10 == 0: await status.edit(f"🚀 **Aktarılıyor...**\n📦 {count} Medya")
+                    except Exception as e:
+                        logger.error(f"Transfer Hatası: {e}")
+                        continue
+        
+        # --- B) BRUTE FORCE MODU (Eğer Kaynakta Topic YOKSA - Tüm Grup) ---
+        # iter_messages bazen boş dönüyor, bu yüzden ID ile tarayacağız.
         else:
-            iterator = userbot.iter_messages(src_entity, limit=limit) # reply_to YOK = HEPSİ
+            # 1. En son mesajın ID'sini bul
+            last_msg = await userbot.get_messages(src_entity, limit=1)
+            if not last_msg:
+                await status.edit("❌ Grupta hiç mesaj bulunamadı!")
+                return
+            
+            last_id = last_msg[0].id
+            logger.info(f"Gruptaki Son ID: {last_id}")
 
-        async for msg in iterator:
-            if msg.media:
+            # 2. Geriye doğru tarama (ID ile)
+            # last_id'den başla, (last_id - limit)'e kadar git
+            current_id = last_id
+            processed = 0
+            
+            while processed < limit and current_id > 0:
+                # 20'şerli paketler halinde ID'leri çek (Daha hızlı)
+                ids_to_fetch = list(range(current_id, max(0, current_id - 20), -1))
+                if not ids_to_fetch: break
+                
                 try:
-                    # Hedefe atarken dst_topic varsa onu kullan, yoksa düz at
-                    await userbot.send_message(
-                        dst_entity, 
-                        file=msg.media, 
-                        message="", # Metin Yok
-                        reply_to=dst_topic # Varsa Topic'e, yoksa genele
-                    )
-                    count += 1
+                    msgs = await userbot.get_messages(src_entity, ids=ids_to_fetch)
+                    for msg in msgs:
+                        if msg and msg.media:
+                            await userbot.send_message(dst_entity, file=msg.media, message="", reply_to=dst_topic)
+                            count += 1
+                            await asyncio.sleep(1.5)
+                        else:
+                            skipped += 1
                     
-                    # Loglama (Her 20 mesajda bir güncelle)
-                    if count % 20 == 0:
-                        await status.edit(f"🚀 **Aktarılıyor...**\n📦 Başarılı: {count}\n⏩ İşlenen: {count+skipped}")
-                    
-                    await asyncio.sleep(1.5) # Spam önlemi
+                    # Durum Güncelleme
+                    processed += len(ids_to_fetch)
+                    current_id -= 20
+                    if count % 10 == 0:
+                         await status.edit(f"🚀 **Brute Force...**\n📦 Taşınan: {count}\n🔍 Taranan ID: {current_id}")
+                         
                 except Exception as e:
-                    print(f"Transfer Hatası: {e}")
-                    # FloodWait gelirse bekle
-                    if "FloodWait" in str(e):
-                        wait_time = int(str(e).split()[3])
-                        await status.edit(f"⏳ **FloodWait:** Telegram dur dedi. {wait_time} saniye bekleniyor...")
-                        await asyncio.sleep(wait_time + 5)
+                    logger.error(f"Batch Hata: {e}")
+                    current_id -= 20
                     continue
-            else:
-                skipped += 1
-                    
-        await status.edit(f"🏁 **İŞLEM BİTTİ!**\n\n✅ Toplam Taşınan: {count}\n🗑️ Atlanan (Yazı vb.): {skipped}")
 
-    except Exception as e: await event.respond(f"❌ Kritik Hata: {e}")
+        await status.edit(f"🏁 **İŞLEM BİTTİ!**\n✅ Toplam Taşınan: {count}\n🗑️ Boş/Yazı: {skipped}")
 
-# --- 8. DİĞER KOMUTLAR (Kısa Tutuldu) ---
+    except Exception as e: 
+        logger.error(f"Kritik Hata: {e}")
+        await event.respond(f"❌ Kritik Hata: {e}")
+
+# --- 8. YARDIMCI KOMUTLAR ---
 @bot.on(events.NewMessage(pattern='/start'))
-async def start(event): await event.respond("👋 **YaelSaver V6.0** Active.\nUse `/transfer` for magic.")
+async def start(event): 
+    uid = event.sender_id
+    await event.respond(f"👋 **YaelSaver V7.0 (ID Scanner)**\nID: `{uid}`")
 
 @bot.on(events.NewMessage(pattern='/vip'))
-async def vip(event): 
-    if event.sender_id in ADMINS: 
+async def vip(event):
+    if event.sender_id in ADMINS:
         try: t=int(event.message.text.split()[1]); set_vip(t,1); await event.respond("✅ VIP")
         except: pass
 
@@ -184,6 +208,7 @@ def main():
     init_db()
     threading.Thread(target=run_web).start()
     print("🚀 System Active!")
+    logger.info("Sistem Başlatıldı - Loglar Aktif")
     userbot.start()
     bot.run_until_disconnected()
 
