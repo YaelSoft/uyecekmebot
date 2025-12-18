@@ -5,7 +5,7 @@ import sqlite3
 import time
 import sys
 import logging
-import struct # Hata yakalamak için
+import struct
 from datetime import datetime
 from telethon import TelegramClient, events, Button
 from telethon.sessions import StringSession
@@ -72,8 +72,7 @@ async def get_entity_and_topic(link):
             group_id = int('-100' + channel_id_part)
             entity = await userbot.get_entity(group_id)
             
-            # Topic ID Kontrolü (HATA BURADAYDI, DÜZELTİLDİ)
-            # Eğer son parça sayıysa VE Grup ID'sine eşit değilse topic'tir.
+            # Topic ID Kontrolü
             if len(parts) > c_index + 2 and parts[-1].isdigit() and parts[-2].isdigit():
                  possible = int(parts[-2]) # Link mesaj linki ise (.../TOPIC/MSG)
                  if str(possible) != channel_id_part: topic_id = possible
@@ -118,10 +117,9 @@ async def transfer_dl(event):
         dst_entity, dst_topic, dst_name = await get_entity_and_topic(dst_link)
         
         # HEDEF TOPIC GÜVENLİK KONTROLÜ
-        # Eğer hedef Topic ID hala çok büyükse, Genel odaya (None) çevir.
         if dst_topic and dst_topic > 2147483647:
             dst_topic = None 
-            await event.respond("⚠️ **UYARI:** Hedef Topic ID geçersiz (Çok büyük). Dosyalar 'Genel' odaya atılacak.")
+            await event.respond("⚠️ **UYARI:** Hedef Topic ID çok büyük. Dosyalar 'Genel' odaya atılacak.")
 
         mode = "NORMAL" if src_topic else "BRUTE FORCE"
 
@@ -146,8 +144,11 @@ async def transfer_dl(event):
                         await asyncio.sleep(1.5)
                         if count % 10 == 0: await status.edit(f"🚀 **Aktarılıyor...**\n📦 {count} Medya")
                     except struct.error:
-                        logger.error("Struct Error: ID hatası, bu mesaj atlandı.")
-                        continue
+                        # Eğer ID hatası verirse Topic'siz (Genele) atmayı dene
+                        try:
+                            await userbot.send_message(dst_entity, file=msg.media, message="")
+                            count += 1
+                        except: continue
                     except Exception as e:
                         if "FloodWait" in str(e):
                             wait = int(str(e).split()[3])
@@ -176,8 +177,11 @@ async def transfer_dl(event):
                                 count += 1
                                 await asyncio.sleep(1.5)
                             except struct.error:
-                                logger.error("Struct Error Atlandı.")
-                                continue
+                                # ID Hatası kurtarma
+                                try:
+                                    await userbot.send_message(dst_entity, file=msg.media, message="")
+                                    count += 1
+                                except: pass
                             except Exception as e:
                                 if "FloodWait" in str(e):
                                     wait = int(str(e).split()[3])
@@ -213,6 +217,7 @@ def main():
     init_db()
     threading.Thread(target=run_web).start()
     print("🚀 System Active!")
+    logger.info("Sistem Başlatıldı")
     userbot.start()
     bot.run_until_disconnected()
 
