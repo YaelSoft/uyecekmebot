@@ -1,5 +1,6 @@
 import os
 import asyncio
+import sqlite3
 import logging
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver V11.0 (Fixed Mode) Active!"
+def home(): return "YaelSaver V12.0 (Otomatik Hafıza) Aktif!"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 API_ID = int(os.environ.get("API_ID", "0"))
@@ -20,16 +21,47 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
 ADMINS = list(map(int, os.environ.get("ALLOWED_USERS", "").split(","))) if os.environ.get("ALLOWED_USERS") else []
 
-# --- 2. GLOBAL KONTROL DEĞİŞKENLERİ ---
-STOP_PROCESS = False  # Durdurma tetiği
+# --- 2. HAFIZA SİSTEMİ (SQLITE) ---
+DB_NAME = "transfer_hafiza.db"
+
+def init_db():
+    """Veritabanını başlatır."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    # Tablo: Hangi mesaj, hangi hedef gruba gönderildi?
+    c.execute('''CREATE TABLE IF NOT EXISTS sent_messages
+                 (src_chat_id INTEGER, src_msg_id INTEGER, dst_chat_id INTEGER)''')
+    conn.commit()
+    conn.close()
+
+def is_already_sent(src_chat, msg_id, dst_chat):
+    """Mesaj daha önce bu hedefe atılmış mı kontrol eder."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT * FROM sent_messages WHERE src_chat_id=? AND src_msg_id=? AND dst_chat_id=?", 
+              (src_chat, msg_id, dst_chat))
+    result = c.fetchone()
+    conn.close()
+    return result is not None
+
+def mark_as_sent(src_chat, msg_id, dst_chat):
+    """Mesajı 'gönderildi' olarak işaretler."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT INTO sent_messages VALUES (?, ?, ?)", (src_chat, msg_id, dst_chat))
+    conn.commit()
+    conn.close()
+
+# Başlangıçta veritabanını kur
+init_db()
 
 # --- 3. İSTEMCİLER ---
 bot = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+STOP_PROCESS = False 
 
-# --- 4. YARDIMCI FONKSİYONLAR (DÜZELTİLDİ) ---
+# --- 4. YARDIMCI FONKSİYONLAR ---
 async def get_entity_and_topic(link):
-    """Linki analiz eder: Grup Entity'sini ve Topic ID'sini hatasız bulur."""
     parts = link.strip().rstrip('/').split('/')
     topic_id = None
     entity = None
@@ -37,60 +69,40 @@ async def get_entity_and_topic(link):
     
     try:
         if 't.me/c/' in link:
-            # Örnek: t.me/c/1234567890/10  veya t.me/c/1234567890/10/555
-            try:
-                c_index = parts.index('c')
-            except ValueError:
-                # 'c' yoksa ama t.me/c/ yapısı varsa manuel bul
+            try: c_index = parts.index('c')
+            except: 
                 for i, p in enumerate(parts):
                     if p == 'c': c_index = i; break
             
-            group_id_str = parts[c_index + 1]
-            group_id = int('-100' + group_id_str)
+            group_id = int('-100' + parts[c_index + 1])
             entity = await userbot.get_entity(group_id)
             
-            # Kalan parçalar (Grup ID'den sonrakiler)
             remaining = parts[c_index + 2:]
-            
-            if len(remaining) == 1:
-                # Durum 1: .../CHAT_ID/TOPIC_ID -> remaining=['10']
-                if remaining[0].isdigit():
-                    topic_id = int(remaining[0])
-            elif len(remaining) >= 2:
-                # Durum 2: .../CHAT_ID/TOPIC_ID/MSG_ID -> remaining=['10', '599']
-                if remaining[0].isdigit():
-                    topic_id = int(remaining[0])
-                    
+            if len(remaining) >= 1 and remaining[0].isdigit():
+                topic_id = int(remaining[0])
         else:
-            # Public link: t.me/username/10
             username = parts[parts.index('t.me') + 1]
             entity = await userbot.get_entity(username)
-            if parts[-1].isdigit(): 
-                topic_id = int(parts[-1])
+            if parts[-1].isdigit(): topic_id = int(parts[-1])
             
         if hasattr(entity, 'title'): entity_name = entity.title
-        # Topic ID Güvenlik
         if topic_id and topic_id > 2147483647: topic_id = None
 
-    except Exception as e: 
-        logger.error(f"Link Hatası: {e}")
-    
+    except Exception as e: logger.error(f"Link Hatası: {e}")
     return entity, topic_id, entity_name
 
-# --- 5. DURDURMA KOMUTU ---
+# --- 5. KOMUTLAR ---
 @bot.on(events.NewMessage(pattern='/stop'))
 async def stop_process(event):
     global STOP_PROCESS
     if event.sender_id not in ADMINS: return
     STOP_PROCESS = True
-    await event.respond("🛑 **İŞLEM DURDURULUYOR...**\n(Mevcut dosya bittikten sonra duracak)")
+    await event.respond("🛑 **DURDURULUYOR...**")
 
-# --- 6. TRANSFER (DÜZELTİLDİ) ---
 @bot.on(events.NewMessage(pattern='/transfer'))
-async def transfer_dl(event):
+async def transfer_auto(event):
     global STOP_PROCESS
-    uid = event.sender_id
-    if uid not in ADMINS: await event.respond("🔒 Admin Only"); return
+    if event.sender_id not in ADMINS: return
     
     STOP_PROCESS = False 
     try:
@@ -99,123 +111,133 @@ async def transfer_dl(event):
         dst_link = args[2]
         limit = min(int(args[3]), 10000)
     except:
-        await event.respond("⚠️ **Hatalı Komut!**\nKullanım: `/transfer [Kaynak] [Hedef] [Adet]`")
+        await event.respond("⚠️ **Örnek:** `/transfer https://t.me/c/kaynak/10 https://t.me/c/hedef/5 500`")
         return
         
-    status = await event.respond(f"⚙️ **Analiz Yapılıyor...**")
+    status = await event.respond(f"⚙️ **Analiz Ediliyor...**")
 
-    # 2. Link Çözme
+    # Linkleri Çöz
     src_entity, src_topic, src_name = await get_entity_and_topic(src_link)
     dst_entity, dst_topic, dst_name = await get_entity_and_topic(dst_link)
     
-    dst_info = f"📂 Topic ID: `{dst_topic}`" if dst_topic else "🌍 GENEL (Topic Algılanmadı!)"
+    # ID'leri veritabanı için al
+    try:
+        src_id_db = src_entity.id
+        dst_id_db = dst_entity.id
+    except:
+        await status.edit("❌ Grup ID'leri alınamadı. Linkleri kontrol et.")
+        return
+
+    dst_info = f"📂 Topic: `{dst_topic}`" if dst_topic else "🌍 GENEL"
     
-    # 3. Bilgi Paneli
     await status.edit(
-        f"🚀 **TRANSFER BAŞLATILDI**\n\n"
+        f"🚀 **AKILLI TRANSFER BAŞLADI**\n\n"
         f"📤 **Kaynak:** {src_name}\n"
         f"📥 **Hedef:** {dst_name}\n"
         f"🎯 **Hedef Yer:** {dst_info}\n"
-        f"📊 **Adet:** {limit}\n\n"
-        f"👇 *Durdurmak için /stop yazın*"
+        f"🧠 **Mod:** Otomatik (Atılanlar Atlanır)\n"
     )
 
     count = 0
-    skipped_size = 0
+    skipped_existing = 0
+    skipped_error = 0
     
     # --- İŞLEYİCİ ---
     async def process_message(msg):
-        nonlocal count, skipped_size
+        nonlocal count, skipped_existing, skipped_error
         if STOP_PROCESS: return "STOP"
 
-        if msg.media:
-            # 100MB Limit
-            if hasattr(msg, 'file') and msg.file.size > 100 * 1024 * 1024:
-                skipped_size += 1
-                return "SKIP"
+        # 1. KONTROL: Bu mesaj daha önce atıldı mı?
+        if is_already_sent(src_id_db, msg.id, dst_id_db):
+            skipped_existing += 1
+            return "SKIP_EXISTING"
 
-            path = None
+        # 2. HATA DÜZELTME: Dosya boyutu kontrolü (Güvenli)
+        is_large = False
+        if msg.file: # Dosya varsa
             try:
-                # İNDİR
+                if msg.file.size > 100 * 1024 * 1024: is_large = True # 100MB
+            except: pass 
+        
+        if is_large:
+            return "SKIP_LARGE"
+
+        path = None
+        try:
+            # Medya varsa indir
+            if msg.media:
                 path = await userbot.download_media(msg)
                 
                 if path:
-                    # YÜKLE
-                    # Telethon'da 'reply_to' parametresi Topic ID'yi kabul eder.
+                    # Gönder
                     await userbot.send_file(
                         dst_entity, 
                         file=path, 
-                        caption="", 
-                        reply_to=dst_topic, # BURASI KRİTİK NOKTA
+                        caption=msg.text or "", 
+                        reply_to=dst_topic,
                         force_document=False
                     )
                     os.remove(path)
-                    count += 1
                     
-                    if count % 3 == 0:
-                        await status.edit(
-                            f"🔄 **AKTARIYORUM...**\n\n"
-                            f"Target: {dst_name}\n"
-                            f"Topic: {dst_topic if dst_topic else 'Genel'}\n"
-                            f"✅ **Başarılı:** {count}\n"
-                            f"📉 **Kalan:** {limit - count}"
-                        )
+                    # BAŞARILI OLURSA VERİTABANINA YAZ
+                    mark_as_sent(src_id_db, msg.id, dst_id_db)
+                    count += 1
+            
+            # Sadece metin ise (İstersen burayı aktif et, şu an pasif)
+            # else:
+            #     await userbot.send_message(dst_entity, msg.text, reply_to=dst_topic)
+            #     mark_as_sent(src_id_db, msg.id, dst_id_db)
+            #     count += 1
+
+            # Bilgi güncelleme (Her 5 işlemde bir)
+            if count % 5 == 0 and count > 0:
+                await status.edit(
+                    f"🔄 **AKTARIYORUM...**\n"
+                    f"✅ **Yeni Atılan:** {count}\n"
+                    f"⏭️ **Zaten Vardı (Atlandı):** {skipped_existing}\n"
+                )
                         
-            except Exception as e:
-                if path and os.path.exists(path): os.remove(path)
-                if "FloodWait" in str(e):
-                    wait = int(str(e).split()[3])
-                    await status.edit(f"⏳ **Telegram Bekletiyor:** {wait} saniye...")
-                    await asyncio.sleep(wait + 5)
-                elif "You can't write" in str(e):
-                    await status.edit("🚨 **HATA:** Hedef grupta YAZMA İZNİN YOK!")
-                    return "ERROR"
-                else:
-                    logger.error(f"Hata: {e}")
+        except Exception as e:
+            if path and os.path.exists(path): os.remove(path)
+            if "FloodWait" in str(e):
+                wait = int(str(e).split()[3])
+                await status.edit(f"⏳ **Telegram Bekletiyor:** {wait}sn mola...")
+                await asyncio.sleep(wait + 5)
+            elif "You can't write" in str(e):
+                return "ERROR_PERM"
+            else:
+                logger.error(f"Hata: {e}")
+                skipped_error += 1
 
     # --- DÖNGÜ ---
     try:
-        if src_topic:
-            # Topic Modu (Kaynak)
-            async for msg in userbot.iter_messages(src_entity, limit=limit, reply_to=src_topic):
-                res = await process_message(msg)
-                if res == "STOP": break
-                if res == "ERROR": break
-                await asyncio.sleep(2) 
-        else:
-            # Genel Mod (Kaynak)
-            last_msg = await userbot.get_messages(src_entity, limit=1)
-            if not last_msg: await status.edit("❌ Mesaj bulunamadı."); return
-            current_id = last_msg[0].id
-            processed = 0
+        # iter_messages otomatik olarak sondan başa tarar
+        async for msg in userbot.iter_messages(src_entity, limit=limit, reply_to=src_topic):
+            res = await process_message(msg)
             
-            while processed < limit and current_id > 0:
-                if STOP_PROCESS: break
-                ids = list(range(current_id, max(0, current_id - 10), -1))
-                if not ids: break
-                
-                msgs = await userbot.get_messages(src_entity, ids=ids)
-                for msg in msgs:
-                    if STOP_PROCESS: break
-                    if msg: await process_message(msg)
-                
-                processed += len(ids)
-                current_id -= 10
-                if count % 3 == 0: 
-                     await status.edit(f"🚀 **Taranıyor...**\n✅ Başarılı: {count}")
+            if res == "STOP": break
+            if res == "ERROR_PERM": 
+                await status.edit("🚨 **HATA:** Hedef grupta yazma izni yok!"); return
+            
+            # Eğer mesaj zaten vardıysa (SKIP_EXISTING), bekleme yapmaya gerek yok, hızlı geçsin
+            if res != "SKIP_EXISTING":
+                await asyncio.sleep(2) # Sadece yeni mesaj atınca bekle
 
-        final_msg = "🛑 **DURDURULDU!**" if STOP_PROCESS else "🏁 **BİTTİ!**"
+        final_msg = "🛑 **DURDURULDU!**" if STOP_PROCESS else "🏁 **İŞLEM BİTTİ!**"
+        
         await status.edit(
             f"{final_msg}\n\n"
-            f"✅ **Toplam:** {count}\n"
-            f"📂 **Giden Yer:** {dst_topic if dst_topic else 'Genel'}"
+            f"✅ **Toplam Yeni Atılan:** {count}\n"
+            f"⏭️ **Zaten Vardı (Atlandı):** {skipped_existing}\n"
+            f"⚠️ **Hatalı/Büyük:** {skipped_error}\n"
+            f"💾 *Hafızaya Kaydedildi.*"
         )
 
-    except Exception as e: await event.respond(f"❌ Kritik Hata: {e}")
+    except Exception as e: await event.respond(f"❌ Sistem Hatası: {e}")
 
-# --- 7. BAŞLATMA ---
+# --- 6. BAŞLATMA ---
 @bot.on(events.NewMessage(pattern='/start'))
-async def start(event): await event.respond("👋 **YaelSaver V11.0 (Fixed)** Hazır.")
+async def start(event): await event.respond("👋 **YaelSaver V12.0 (Akıllı Hafıza)** Hazır.\nArtık ID girme derdi yok.")
 
 def main():
     import threading
