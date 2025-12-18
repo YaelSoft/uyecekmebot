@@ -15,7 +15,7 @@ from flask import Flask
 # --- 1. RENDER WEB SUNUCUSU ---
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver V4.0 Active!"
+def home(): return "YaelSaver V5.0 Ultimate Transfer Active!"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # --- 2. AYARLAR ---
@@ -30,31 +30,29 @@ FSUB_CHANNEL = os.environ.get("FSUB_CHANNEL", "")
 
 START_TIME = time.time()
 
-# --- 3. DİL VE METİNLER ---
+# --- 3. METİNLER ---
 TEXTS = {
     "en": {
-        "welcome": "👋 **Welcome!**\nSelect Language:",
-        "lang_set": "✅ Language set to **English**.",
-        "menu_vip": "💎 **VIP DASHBOARD**\n\n🆔 ID: `{uid}`\n⚡ **Status: UNLIMITED**\n\n🔥 **Features:**\n• `/range link 100-200` -> Batch DL\n• `/topic_copy link limit` -> Topic DL\n• `/transfer src dst limit` -> Topic Transfer\n• **Note:** Text captions are removed automatically.",
-        "menu_free": "👤 **FREE DASHBOARD**\n\nStatus: Free\nLimit: {limit}/3\n\nUsage: Send Link.",
+        "welcome": "👋 **Welcome!**",
+        "menu_vip": "💎 **VIP DASHBOARD**\n\n🆔 ID: `{uid}`\n⚡ **Status: UNLIMITED**\n\n🔥 **Features:**\n• `/transfer src dst limit` -> Advanced Transfer\n• `/full_copy link limit` -> Download All\n• **Note:** Captions removed automatically.",
+        "menu_free": "👤 **FREE DASHBOARD**\n\nLimit: {limit}/3",
         "vip_only": "🔒 **VIP Feature Only!**",
-        "limit_reached": "⛔ **Limit Reached!** Contact Owner.",
+        "limit_reached": "⛔ **Limit Reached!**",
         "processing": "🔄 **Processing...**",
-        "downloading": "⬇️ **Downloading Media...**",
-        "uploading": "⬆️ **Uploading (No Caption)...**",
-        "error_access": "❌ Access Denied / Invalid Link"
+        "downloading": "⬇️ **DL...**",
+        "uploading": "⬆️ **UL...**",
+        "error_access": "❌ Error / Invalid Link"
     },
     "tr": {
-        "welcome": "👋 **Hoş Geldiniz!**\nDil seçiniz:",
-        "lang_set": "✅ Dil: **Türkçe**.",
-        "menu_vip": "💎 **VIP PANELİ**\n\n🆔 ID: `{uid}`\n⚡ **Durum: SINIRSIZ**\n\n🔥 **Özellikler:**\n• `/range link 100-200` -> Aralıklı İndir\n• `/topic_copy link adet` -> Kategori İndir\n• `/transfer kaynak hedef adet` -> Kategori Transferi\n• **Not:** Orijinal metinler silinir, sadece medya aktarılır.",
-        "menu_free": "👤 **ÜCRETSİZ PANEL**\n\nDurum: Ücretsiz\nHak: {limit}/3\n\nKullanım: Link gönder.",
+        "welcome": "👋 **Hoş Geldiniz!**",
+        "menu_vip": "💎 **VIP PANELİ**\n\n🆔 ID: `{uid}`\n⚡ **Durum: SINIRSIZ**\n\n🔥 **Özellikler:**\n• `/transfer kaynak hedef adet` -> Gelişmiş Transfer\n• `/full_copy link adet` -> Hepsini İndir\n• **Not:** Metinler silinir, sadece medya taşınır.",
+        "menu_free": "👤 **ÜCRETSİZ PANEL**\n\nHak: {limit}/3",
         "vip_only": "🔒 **Sadece VIP!**",
-        "limit_reached": "⛔ **Günlük Hak Bitti!**",
+        "limit_reached": "⛔ **Hak Bitti!**",
         "processing": "🔄 **İşleniyor...**",
-        "downloading": "⬇️ **Medya İndiriliyor...**",
-        "uploading": "⬆️ **Yükleniyor (Yazısız)...**",
-        "error_access": "❌ Erişilemedi veya Link Hatalı"
+        "downloading": "⬇️ **İndiriliyor...**",
+        "uploading": "⬆️ **Yükleniyor...**",
+        "error_access": "❌ Hata / Geçersiz Link"
     }
 }
 
@@ -108,8 +106,8 @@ async def check_fsub(uid, lang):
         return True
     except UserNotParticipantError:
         link = f"https://t.me/{FSUB_CHANNEL.replace('@','')}" if str(FSUB_CHANNEL).startswith("@") else f"https://t.me/joinchat/{FSUB_CHANNEL}"
-        buttons = [[Button.url("📢 Join Channel", link)], [Button.inline("✅ I Joined!", b"check_fsub")]]
-        await bot.send_message(uid, TEXTS[lang].get('fsub_msg', "Join First"), buttons=buttons)
+        buttons = [[Button.url("Join Channel", link)], [Button.inline("✅ Joined", b"check_fsub")]]
+        await bot.send_message(uid, "Join First", buttons=buttons)
         return False
     except: return True
 
@@ -132,17 +130,13 @@ async def callback_handler(event):
 @bot.on(events.NewMessage(pattern='/vip'))
 async def vip_add(event):
     if event.sender_id not in ADMINS: return
-    try:
-        t = int(event.message.text.split()[1])
-        set_vip(t, 1); await event.respond(f"✅ {t} VIP.")
+    try: t = int(event.message.text.split()[1]); set_vip(t, 1); await event.respond(f"✅ {t} VIP.")
     except: pass
 
 @bot.on(events.NewMessage(pattern='/unvip'))
 async def vip_rem(event):
     if event.sender_id not in ADMINS: return
-    try:
-        t = int(event.message.text.split()[1])
-        set_vip(t, 0); await event.respond(f"❌ {t} Normal.")
+    try: t = int(event.message.text.split()[1]); set_vip(t, 0); await event.respond(f"❌ {t} Normal.")
     except: pass
 
 @bot.on(events.NewMessage(pattern='/broadcast'))
@@ -158,137 +152,99 @@ async def broadcast(event):
         except: pass
     await event.respond("✅ Broadcast Done.")
 
-# --- 8. YARDIMCI: ENTITY VE TOPIC ÇÖZÜCÜ (DÜZELTİLEN KISIM) ---
+# --- 8. ENTITY VE TOPIC ÇÖZÜCÜ (GELİŞMİŞ) ---
 async def get_entity_and_topic(link):
     parts = link.rstrip('/').split('/')
     topic_id = None
     entity = None
     
-    # Kanal ID'sini bul (t.me/c/KANAL_ID/...)
     if 't.me/c/' in link:
         c_index = parts.index('c')
         channel_id_part = parts[c_index + 1]
         group_id = int('-100' + channel_id_part)
         entity = await userbot.get_entity(group_id)
         
-        # Topic ID Tespiti (HATA ÇÖZÜLDÜ)
-        # Link: t.me/c/3610650322/10 -> parts[-1] = 10
-        # channel_id_part = 3610650322
+        # Topic ID Kontrolü:
+        # Eğer link t.me/c/ID ise -> Topic ID = None (Tüm grup)
+        # Eğer link t.me/c/ID/10 ise -> Topic ID = 10 (Sadece o oda)
         
-        # Sondaki parça sayıysa ve Kanal ID'ye eşit DEĞİLSE -> Topic ID'dir
+        # Linkin sonundaki parça sayıysa ve Kanal ID'ye eşit değilse:
         if parts[-1].isdigit():
             possible_id = int(parts[-1])
             if str(possible_id) != channel_id_part:
                 topic_id = possible_id
-                
-        # Bazen link: .../TOPIC_ID/MSG_ID olur. O zaman sondan ikinciye bak
+        
+        # Bazen link: .../TOPIC_ID/MSG_ID olur. Sondan ikinciye bak
         if len(parts) > c_index + 2 and parts[-1].isdigit() and parts[-2].isdigit():
              possible_topic = int(parts[-2])
              if str(possible_topic) != channel_id_part:
                  topic_id = possible_topic
 
     else:
-        # Public link: t.me/username/10
         username = parts[parts.index('t.me') + 1]
         entity = await userbot.get_entity(username)
-        if parts[-1].isdigit():
-            topic_id = int(parts[-1])
+        if parts[-1].isdigit(): topic_id = int(parts[-1])
 
     return entity, topic_id
 
-# --- 9. TRANSFER (TOPIC TO TOPIC) ---
+# --- 9. TRANSFER (HEPSİNDEN -> TEK KATEGORİYE) ---
 @bot.on(events.NewMessage(pattern='/transfer'))
 async def transfer_dl(event):
     uid = event.sender_id
     u = get_user(uid)
     lang = u[4]
-    if uid not in ADMINS and u[1] == 0:
-        await event.respond(get_text(lang, 'vip_only'))
-        return
+    if uid not in ADMINS and u[1] == 0: await event.respond(get_text(lang, 'vip_only')); return
     
     try:
         args = event.message.text.split()
         src_link = args[1]
         dst_link = args[2]
-        # Limiti 100.000'e sabitle (Hata vermesin)
         limit = min(int(args[3]), 100000)
         
-        status = await event.respond(f"🔄 **Transfer Başlıyor...**\nLimit: {limit}")
+        status = await event.respond(f"🔄 **Transfer Başlıyor...**\nLimit: {limit}\nKaynak taranıyor...")
 
-        src_entity, src_topic = await get_entity_and_topic(src_link)
-        dst_entity, dst_topic = await get_entity_and_topic(dst_link)
+        # Linkleri Çöz
+        src_entity, src_topic = await get_entity_and_topic(src_link) # Kaynak
+        dst_entity, dst_topic = await get_entity_and_topic(dst_link) # Hedef
 
-        msgs = await userbot.get_messages(src_entity, limit=limit, reply_to=src_topic)
-        
+        # Bilgi Mesajı
+        src_info = "TÜM GRUP (Karışık)" if src_topic is None else f"Topic {src_topic}"
+        dst_info = "ANA SAYFA" if dst_topic is None else f"Topic {dst_topic}"
+        await status.edit(f"🔄 **Transfer Detayı:**\n\n📤 **Kaynak:** {src_info}\n📥 **Hedef:** {dst_info}\n📊 **Hedef Sayı:** {limit}")
+
+        # İŞLEM
         count = 0
-        for msg in reversed(msgs):
+        # iter_messages: Eğer src_topic=None ise, grubun TÜM mesajlarını (karışık topicler dahil) tarar.
+        async for msg in userbot.iter_messages(src_entity, limit=limit, reply_to=src_topic):
             if msg.media:
                 try:
+                    # Hedefe atarken dst_topic (10) kullanarak atıyoruz
                     await userbot.send_message(
                         dst_entity, 
                         file=msg.media, 
-                        message="", 
-                        reply_to=dst_topic 
+                        message="", # Metin Yok
+                        reply_to=dst_topic # Hedef Kategoriye Zorla
                     )
                     count += 1
-                    await asyncio.sleep(2)
+                    # Hız ayarı: 4000 mesaj için çok beklemeyelim ama ban da yemeyelim
+                    # 1.5 saniye idealdir
+                    await asyncio.sleep(1.5)
+                    
+                    if count % 10 == 0:
+                        await status.edit(f"🔄 Taşınıyor... ({count}/{limit})")
+                        
                 except Exception as e: 
+                    # FloodWait gelirse bekle
+                    if "FloodWait" in str(e):
+                        wait_time = int(str(e).split()[3])
+                        await asyncio.sleep(wait_time + 5)
                     continue
                     
-        await status.edit(f"✅ **Transfer Tamam!**\n📦 {count} Medya Taşındı.")
+        await status.edit(f"✅ **Transfer Bitti!**\n📦 {count} Medya Taşındı.")
 
     except Exception as e: await event.respond(f"❌ Error: {e}")
 
-# --- 10. DİĞER KOMUTLAR ---
-@bot.on(events.NewMessage(pattern='/range'))
-async def range_dl(event):
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4]
-    if not await check_fsub(uid, lang): return
-    if uid not in ADMINS and u[1] == 0: await event.respond(get_text(lang, 'vip_only')); return
-    try:
-        args = event.message.text.split(); link = args[1]; start, end = map(int, args[2].split('-'))
-        status = await event.respond(f"Processing {start}-{end}...")
-        entity, _ = await get_entity_and_topic(link)
-        count = 0
-        for i in range(start, end + 1):
-            try:
-                msg = await userbot.get_messages(entity, ids=i)
-                if msg and msg.media:
-                    path = await userbot.download_media(msg)
-                    await bot.send_file(event.chat_id, path, caption="")
-                    os.remove(path); count += 1
-            except: continue
-        await status.edit(f"✅ Range Done: {count}")
-    except: await event.respond("❌ Error.")
-
-@bot.on(events.NewMessage(pattern='/topic_copy'))
-async def topic_copy(event):
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4]
-    if uid not in ADMINS and u[1] == 0: await event.respond(get_text(lang, 'vip_only')); return
-    try:
-        args = event.message.text.split(); link = args[1]
-        limit = min(int(args[2]), 100000) # Sabitleme
-        
-        status = await event.respond(f"🔍 Topic Scan ({limit} max)...")
-        entity, topic_id = await get_entity_and_topic(link)
-        
-        if not topic_id: await status.edit("❌ No Topic ID detected."); return
-        
-        count = 0
-        async for msg in userbot.iter_messages(entity, limit=limit, reply_to=topic_id):
-            if not msg.media: continue
-            try:
-                path = await userbot.download_media(msg)
-                await bot.send_file(event.chat_id, path, caption="")
-                os.remove(path); count += 1; await asyncio.sleep(1)
-            except: continue
-        await status.edit(f"✅ Topic Done: {count}")
-    except Exception as e: await event.respond(f"❌ Error: {e}")
-
+# --- 10. DİĞERLERİ ---
 @bot.on(events.NewMessage(pattern='/full_copy'))
 async def full_copy(event):
     uid = event.sender_id
@@ -296,11 +252,8 @@ async def full_copy(event):
     lang = u[4]
     if uid not in ADMINS and u[1] == 0: await event.respond(get_text(lang, 'vip_only')); return
     try:
-        args = event.message.text.split(); link = args[1]
-        limit = min(int(args[2]), 100000) # Sabitleme
-        
-        status = await event.respond(f"🌍 Full Scan...")
-        entity, _ = await get_entity_and_topic(link)
+        args = event.message.text.split(); link = args[1]; limit = min(int(args[2]), 100000)
+        status = await event.respond(f"🌍 Full Scan..."); entity, _ = await get_entity_and_topic(link)
         count = 0
         async for msg in userbot.iter_messages(entity, limit=limit):
             if not msg.media: continue
@@ -321,7 +274,6 @@ async def downloader(event):
     vip = u[1] == 1
     if not await check_fsub(uid, lang): return
     if uid not in ADMINS and not vip and u[2] <= 0: await event.respond(get_text(lang, 'limit_reached')); return
-    
     status = await event.respond(get_text(lang, 'processing'))
     text = event.message.text.strip()
     try:
@@ -329,18 +281,15 @@ async def downloader(event):
             try: await userbot(ImportChatInviteRequest(text.split('+')[-1])); await status.edit("✅ Joined.")
             except: await status.edit("✅ Joined/Fail.")
             return
-        
         entity, _ = await get_entity_and_topic(text)
-        parts = text.rstrip('/').split('/')
-        msg_id = int(parts[-1])
-        
+        parts = text.rstrip('/').split('/'); msg_id = int(parts[-1])
         msg = await userbot.get_messages(entity, ids=msg_id)
         if msg.media:
             await status.edit(get_text(lang, 'downloading'))
             path = await userbot.download_media(msg)
             await status.edit(get_text(lang, 'uploading'))
             await bot.send_file(event.chat_id, path, caption="")
-            os.remove(path)
+            os.remove(path); 
             if uid not in ADMINS and not vip: use_right(uid)
             await status.delete()
         else: await status.edit("No media.")
