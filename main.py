@@ -15,7 +15,7 @@ from flask import Flask
 # --- 1. RENDER WEB SUNUCUSU ---
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver Pro Transfer Active!"
+def home(): return "YaelSaver V4.0 Active!"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # --- 2. AYARLAR ---
@@ -158,28 +158,42 @@ async def broadcast(event):
         except: pass
     await event.respond("✅ Broadcast Done.")
 
-# --- 8. YARDIMCI: ENTITY VE TOPIC ÇÖZÜCÜ ---
+# --- 8. YARDIMCI: ENTITY VE TOPIC ÇÖZÜCÜ (DÜZELTİLEN KISIM) ---
 async def get_entity_and_topic(link):
-    # Linki analiz et: t.me/c/12345/888 (Topic) veya t.me/c/12345 (Genel)
     parts = link.rstrip('/').split('/')
     topic_id = None
+    entity = None
     
-    # Topic ID Tespiti
-    if len(parts) >= 2 and parts[-1].isdigit() and parts[-2].isdigit():
-         # Format: .../TOPIC_ID/MSG_ID (Mesaj linki) -> Topic ID: parts[-2]
-         topic_id = int(parts[-2])
-    elif parts[-1].isdigit():
-         # Format: .../TOPIC_ID (Topic linki)
-         topic_id = int(parts[-1])
-    
-    # Entity (Grup/Kanal) Tespiti
+    # Kanal ID'sini bul (t.me/c/KANAL_ID/...)
     if 't.me/c/' in link:
-        group_id = int('-100' + parts[parts.index('c') + 1])
+        c_index = parts.index('c')
+        channel_id_part = parts[c_index + 1]
+        group_id = int('-100' + channel_id_part)
         entity = await userbot.get_entity(group_id)
+        
+        # Topic ID Tespiti (HATA ÇÖZÜLDÜ)
+        # Link: t.me/c/3610650322/10 -> parts[-1] = 10
+        # channel_id_part = 3610650322
+        
+        # Sondaki parça sayıysa ve Kanal ID'ye eşit DEĞİLSE -> Topic ID'dir
+        if parts[-1].isdigit():
+            possible_id = int(parts[-1])
+            if str(possible_id) != channel_id_part:
+                topic_id = possible_id
+                
+        # Bazen link: .../TOPIC_ID/MSG_ID olur. O zaman sondan ikinciye bak
+        if len(parts) > c_index + 2 and parts[-1].isdigit() and parts[-2].isdigit():
+             possible_topic = int(parts[-2])
+             if str(possible_topic) != channel_id_part:
+                 topic_id = possible_topic
+
     else:
+        # Public link: t.me/username/10
         username = parts[parts.index('t.me') + 1]
         entity = await userbot.get_entity(username)
-        
+        if parts[-1].isdigit():
+            topic_id = int(parts[-1])
+
     return entity, topic_id
 
 # --- 9. TRANSFER (TOPIC TO TOPIC) ---
@@ -193,43 +207,35 @@ async def transfer_dl(event):
         return
     
     try:
-        # Kullanım: /transfer [KaynakLink] [HedefLink] [Adet]
         args = event.message.text.split()
-        if len(args) < 4:
-            await event.respond("⚠️ Usage: `/transfer [Src] [Dst] [Limit]`")
-            return
-
         src_link = args[1]
         dst_link = args[2]
-        limit = int(args[3])
+        # Limiti 100.000'e sabitle (Hata vermesin)
+        limit = min(int(args[3]), 100000)
         
         status = await event.respond(f"🔄 **Transfer Başlıyor...**\nLimit: {limit}")
 
-        # Kaynak ve Hedef'i Analiz Et
         src_entity, src_topic = await get_entity_and_topic(src_link)
         dst_entity, dst_topic = await get_entity_and_topic(dst_link)
 
-        # Mesajları Çek (reply_to=src_topic ile sadece o kategoriyi alır)
         msgs = await userbot.get_messages(src_entity, limit=limit, reply_to=src_topic)
         
         count = 0
         for msg in reversed(msgs):
             if msg.media:
                 try:
-                    # Hedefe Gönder (reply_to=dst_topic ile o kategoriye atar)
-                    # CAPTION BOŞ ("") - Temiz Medya
                     await userbot.send_message(
                         dst_entity, 
                         file=msg.media, 
-                        message="", # Metni sil
-                        reply_to=dst_topic # Hedef kategoriye at
+                        message="", 
+                        reply_to=dst_topic 
                     )
                     count += 1
-                    await asyncio.sleep(2) # Spam önleme
+                    await asyncio.sleep(2)
                 except Exception as e: 
                     continue
                     
-        await status.edit(f"✅ **Transfer Tamam!**\n📦 {count} Medya Taşındı.\n📂 Kaynak Topic: {src_topic or 'Genel'}\n📂 Hedef Topic: {dst_topic or 'Genel'}")
+        await status.edit(f"✅ **Transfer Tamam!**\n📦 {count} Medya Taşındı.")
 
     except Exception as e: await event.respond(f"❌ Error: {e}")
 
@@ -264,10 +270,14 @@ async def topic_copy(event):
     lang = u[4]
     if uid not in ADMINS and u[1] == 0: await event.respond(get_text(lang, 'vip_only')); return
     try:
-        args = event.message.text.split(); link = args[1]; limit = int(args[2])
-        status = await event.respond(f"🔍 Topic Scan...")
+        args = event.message.text.split(); link = args[1]
+        limit = min(int(args[2]), 100000) # Sabitleme
+        
+        status = await event.respond(f"🔍 Topic Scan ({limit} max)...")
         entity, topic_id = await get_entity_and_topic(link)
-        if not topic_id: await status.edit("❌ No Topic ID in link."); return
+        
+        if not topic_id: await status.edit("❌ No Topic ID detected."); return
+        
         count = 0
         async for msg in userbot.iter_messages(entity, limit=limit, reply_to=topic_id):
             if not msg.media: continue
@@ -286,7 +296,9 @@ async def full_copy(event):
     lang = u[4]
     if uid not in ADMINS and u[1] == 0: await event.respond(get_text(lang, 'vip_only')); return
     try:
-        args = event.message.text.split(); link = args[1]; limit = int(args[2])
+        args = event.message.text.split(); link = args[1]
+        limit = min(int(args[2]), 100000) # Sabitleme
+        
         status = await event.respond(f"🌍 Full Scan...")
         entity, _ = await get_entity_and_topic(link)
         count = 0
@@ -318,10 +330,9 @@ async def downloader(event):
             except: await status.edit("✅ Joined/Fail.")
             return
         
-        # Link Çözücü
         entity, _ = await get_entity_and_topic(text)
         parts = text.rstrip('/').split('/')
-        msg_id = int(parts[-1]) # Mesaj ID her zaman en sondadır (Topic linki değilse)
+        msg_id = int(parts[-1])
         
         msg = await userbot.get_messages(entity, ids=msg_id)
         if msg.media:
