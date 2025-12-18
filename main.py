@@ -6,23 +6,23 @@ from threading import Thread
 from flask import Flask
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import FloodWait, FileReferenceExpiredError, ChatForwardsRestrictedError
+# Telethon Hata Kütüphaneleri (DÜZELTİLDİ)
+from telethon.errors import FloodWaitError, FileReferenceExpiredError, ChatForwardsRestrictedError
 
-# --- 1. AYARLAR (Pella/Render Env Variables) ---
+# --- 1. AYARLAR (Env Variables) ---
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-SESSION_STRING = os.environ.get("SESSION_STRING", "") # Userbot Session
-# Admin ID'leri (Virgülle ayır)
+SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 ADMINS = list(map(int, os.environ.get("ADMINS", "123456789").split(",")))
 
-# --- 2. LOG & WEB SERVER (7/24) ---
+# --- 2. LOG & WEB SERVER ---
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver V14.0 (Panel Edition) Online! 🚀"
+def home(): return "YaelSaver V15.0 (Grand Final) Online! 🚀"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -32,22 +32,77 @@ def keep_alive():
     t = Thread(target=run_web)
     t.start()
 
-# --- 3. VERİTABANI YÖNETİMİ ---
-DB_NAME = "yaelsaver_v14.db"
+# --- 3. DİL PAKETİ (TR / EN) ---
+LANG_DATA = {
+    "TR": {
+        "welcome": "👋 **YaelSaver V15.0'a Hoşgeldin!**\n\n🇹🇷 **Türkçe Modu Aktif**\n\n📜 **Komutlar:**\n🔹 `/transfer [Kaynak] [Hedef] [Adet]` -> Toplu Aktar\n🔹 `/getmedia [Link]` -> Tekli İndir\n🔹 `/status` -> Hakkını Gör\n🔹 `/lang EN` -> Switch to English\n\n👮‍♂️ **Admin:** `/addvip`, `/delvip`",
+        "lang_set": "🇹🇷 Dil **Türkçe** olarak ayarlandı.",
+        "rights_out": "❌ **Hakkınız Bitti!** Lütfen admin ile görüşün.",
+        "admin_only": "🔒 Bu komut sadece Adminler içindir.",
+        "analyzing": "⚙️ **Analiz Ediliyor...**",
+        "started": "🚀 **İŞLEM BAŞLADI**\n\n📤 **Kaynak:** {}\n📥 **Hedef:** {}\n📊 **Limit:** {}",
+        "transferring": "🔄 **Aktarılıyor...**\n✅ Başarılı: {}\n⏭️ Zaten Vardı: {}\n📉 Kalan: {}",
+        "done": "🏁 **İŞLEM TAMAMLANDI!**\n\n✅ Toplam: {}\n⏭️ Atlanan: {}\n⚠️ Hatalı: {}",
+        "stopped": "🛑 **İşlem Durduruldu!**",
+        "media_dl": "📥 **İndiriliyor...**",
+        "media_ul": "📤 **Yükleniyor...**",
+        "error": "❌ Hata: {}",
+        "not_found": "❌ İçerik bulunamadı veya erişilemiyor.",
+        "syntax_transfer": "⚠️ **Kullanım:** `/transfer https://t.me/kaynak/10 https://t.me/hedef/5 100`",
+        "syntax_media": "⚠️ **Kullanım:** `/getmedia https://t.me/c/xxxx/xxxx`"
+    },
+    "EN": {
+        "welcome": "👋 **Welcome to YaelSaver V15.0!**\n\n🇺🇸 **English Mode Active**\n\n📜 **Commands:**\n🔹 `/transfer [Src] [Dst] [Limit]` -> Bulk Transfer\n🔹 `/getmedia [Link]` -> Single Download\n🔹 `/status` -> Check Rights\n🔹 `/lang TR` -> Türkçeye Geç\n\n👮‍♂️ **Admin:** `/addvip`, `/delvip`",
+        "lang_set": "🇺🇸 Language set to **English**.",
+        "rights_out": "❌ **Out of credits!** Contact admin.",
+        "admin_only": "🔒 Admin access only.",
+        "analyzing": "⚙️ **Analyzing...**",
+        "started": "🚀 **PROCESS STARTED**\n\n📤 **Source:** {}\n📥 **Dest:** {}\n📊 **Limit:** {}",
+        "transferring": "🔄 **Transferring...**\n✅ Success: {}\n⏭️ Skipped: {}\n📉 Remaining: {}",
+        "done": "🏁 **COMPLETED!**\n\n✅ Total: {}\n⏭️ Skipped: {}\n⚠️ Errors: {}",
+        "stopped": "🛑 **Process Stopped!**",
+        "media_dl": "📥 **Downloading...**",
+        "media_ul": "📤 **Uploading...**",
+        "error": "❌ Error: {}",
+        "not_found": "❌ Content not found or inaccessible.",
+        "syntax_transfer": "⚠️ **Usage:** `/transfer [Src] [Dst] [Limit]`",
+        "syntax_media": "⚠️ **Usage:** `/getmedia [Link]`"
+    }
+}
+
+# --- 4. VERİTABANI VE AYARLAR ---
+DB_NAME = "yaelsaver_v15.db"
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # Kullanıcılar Tablosu: ID, Üyelik Tipi (FREE/VIP), Kalan Hak
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (user_id INTEGER PRIMARY KEY, tier TEXT, rights INTEGER)''')
-    # Hafıza Tablosu: Aynı mesajı tekrar atmamak için
-    c.execute('''CREATE TABLE IF NOT EXISTS history
-                 (src_chat INTEGER, msg_id INTEGER, dst_chat INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, tier TEXT, rights INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS history (src_chat INTEGER, msg_id INTEGER, dst_chat INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
     conn.commit()
     conn.close()
 
-# Kullanıcı İşlemleri
+# -- Dil Ayarları --
+def get_lang():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key='lang'")
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res else "TR"
+
+def set_lang_db(lang_code):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('lang', ?)", (lang_code,))
+    conn.commit()
+    conn.close()
+
+def T(key):
+    lang = get_lang()
+    return LANG_DATA.get(lang, LANG_DATA["TR"]).get(key, key)
+
+# -- Kullanıcı ve Hafıza --
 def register_user(user_id):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -62,7 +117,7 @@ def get_user_status(user_id):
     c.execute("SELECT tier, rights FROM users WHERE user_id=?", (user_id,))
     res = c.fetchone()
     conn.close()
-    return res if res else ("FREE", 0) # Kayıtlı değilse
+    return res if res else ("FREE", 0)
 
 def use_right(user_id):
     tier, rights = get_user_status(user_id)
@@ -85,7 +140,6 @@ def set_vip(user_id, is_vip):
     conn.commit()
     conn.close()
 
-# Hafıza Kontrolü
 def check_history(src, msg, dst):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -101,125 +155,100 @@ def add_history(src, msg, dst):
     conn.commit()
     conn.close()
 
-# --- 4. İSTEMCİLER ---
+# --- 5. İSTEMCİLER ---
 init_db()
 bot = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
-userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, connection_retries=None, auto_reconnect=True)
+
 STOP_PROCESS = False
 
-# --- 5. YARDIMCI: Link Çözücü ---
+# --- 6. PARSE & SMART SEND ---
 async def parse_link(link):
     parts = link.strip().rstrip('/').split('/')
     entity = None
     topic_id = None
     msg_id = None
+    entity_name = "Unknown"
     
     try:
-        # Mesaj ID var mı? (En sondaki sayı)
-        if parts[-1].isdigit():
-            msg_id = int(parts[-1])
-        
-        # Topic ID var mı? (Sondan ikinci sayı)
-        # Örnek: t.me/c/1234/TOPIC/MSG -> len=...
+        if parts[-1].isdigit(): msg_id = int(parts[-1])
         
         if 't.me/c/' in link:
-            # Private: .../c/CHATID/...
             c_index = parts.index('c')
             chat_id = int('-100' + parts[c_index + 1])
             entity = await userbot.get_entity(chat_id)
-            
-            # Topic ve Msg ayrımı
             remaining = parts[c_index + 2:]
-            if len(remaining) == 2: # CHAT/TOPIC/MSG
+            if len(remaining) == 2:
                 topic_id = int(remaining[0])
                 msg_id = int(remaining[1])
-            elif len(remaining) == 1: # CHAT/MSG
+            elif len(remaining) == 1:
                 msg_id = int(remaining[0])
-                
         else:
-            # Public: t.me/user/MSG
             username = parts[parts.index('t.me') + 1]
             entity = await userbot.get_entity(username)
             if parts[-1].isdigit(): msg_id = int(parts[-1])
             
-        # Topic ID Güvenliği (Mesaj ID ile karışmasın)
+        if hasattr(entity, 'title'): entity_name = entity.title
         if topic_id and topic_id > 2000000000: topic_id = None
 
-    except Exception as e:
-        logger.error(f"Link Parse Error: {e}")
-    
-    return entity, topic_id, msg_id
+    except Exception: pass
+    return entity, topic_id, msg_id, entity_name
 
-# --- 6. CORE: TRANSFER MOTORU (Kopyala -> Olmazsa İndir) ---
 async def smart_send(msg, dst_entity, dst_topic=None):
-    # 1. YÖNTEM: TEMİZ KOPYALAMA (İletildi yazmaz)
-    # Telethon'da 'send_message(file=msg.media)' yapmak temiz kopya oluşturur.
+    # 1. Temiz Kopya (İletildi yazısı olmadan)
     try:
         if msg.media:
-            await userbot.send_file(
-                dst_entity,
-                file=msg.media,
-                caption=msg.text or "",
-                reply_to=dst_topic,
-                force_document=False
-            )
+            await userbot.send_file(dst_entity, file=msg.media, caption=msg.text or "", reply_to=dst_topic, force_document=False)
         elif msg.text:
-            await userbot.send_message(
-                dst_entity,
-                msg.text,
-                reply_to=dst_topic
-            )
-        return True # Başarılı
-        
-    except (ChatForwardsRestrictedError, FileReferenceExpiredError) as e:
-        # 2. YÖNTEM: KANAL KORUMALIYSA İNDİR -> YÜKLE
+            await userbot.send_message(dst_entity, msg.text, reply_to=dst_topic)
+        return True
+    except (ChatForwardsRestrictedError, FileReferenceExpiredError):
+        # 2. Yasaklıysa İndir-Yükle
         path = None
         try:
             path = await userbot.download_media(msg)
             if path:
-                await userbot.send_file(
-                    dst_entity,
-                    file=path,
-                    caption=msg.text or "",
-                    reply_to=dst_topic,
-                    force_document=False
-                )
+                await userbot.send_file(dst_entity, file=path, caption=msg.text or "", reply_to=dst_topic, force_document=False)
                 os.remove(path)
                 return True
-        except Exception as inner_e:
+        except Exception:
             if path and os.path.exists(path): os.remove(path)
             return False
-    except Exception as e:
-        return False
+    except Exception: return False
 
 # --- 7. KOMUTLAR ---
 
 @bot.on(events.NewMessage(pattern='/start'))
 async def start(event):
     register_user(event.sender_id)
-    await event.respond(
-        "👋 **YaelSaver V14.0 (Panel) Hazır!**\n\n"
-        "📜 **Komutlar:**\n"
-        "🔹 `/getmedia [Link]` -> Tek Mesaj İndir\n"
-        "🔹 `/transfer [Kaynak] [Hedef] [Limit]` -> Toplu Çek\n"
-        "🔹 `/status` -> Hakkını Sorgula\n"
-        "👮‍♂️ **Admin:** `/addvip`, `/delvip`"
-    )
+    # Dile göre karşılama mesajı
+    await event.respond(T("welcome"))
+
+@bot.on(events.NewMessage(pattern='/lang'))
+async def lang_handler(event):
+    if event.sender_id not in ADMINS: return
+    try:
+        target = event.text.split()[1].upper()
+        if target in ["TR", "EN"]:
+            set_lang_db(target)
+            await event.respond(T("lang_set"))
+        else: await event.respond("TR / EN ?")
+    except: await event.respond("/lang TR")
 
 @bot.on(events.NewMessage(pattern='/status'))
 async def status(event):
     tier, rights = get_user_status(event.sender_id)
-    await event.respond(f"📊 **Durumunuz:**\n👑 Üyelik: **{tier}**\n🎫 Kalan Hak: **{rights}**")
+    # Status mesajını da dile göre çevirebiliriz ama basit tutalım
+    await event.respond(f"📊 **User Status:**\n👑 Tier: **{tier}**\n🎫 Rights: **{rights}**")
 
-# --- ADMIN KOMUTLARI ---
 @bot.on(events.NewMessage(pattern='/addvip'))
 async def add_vip(event):
     if event.sender_id not in ADMINS: return
     try:
         target_id = int(event.text.split()[1])
         set_vip(target_id, True)
-        await event.respond(f"✅ Kullanıcı ({target_id}) **VIP** yapıldı!")
-    except: await event.respond("Hata: `/addvip ID`")
+        await event.respond(f"✅ {target_id} -> VIP")
+    except: await event.respond("Usage: `/addvip ID`")
 
 @bot.on(events.NewMessage(pattern='/delvip'))
 async def del_vip(event):
@@ -227,138 +256,28 @@ async def del_vip(event):
     try:
         target_id = int(event.text.split()[1])
         set_vip(target_id, False)
-        await event.respond(f"❌ Kullanıcı ({target_id}) **FREE** moda alındı.")
-    except: await event.respond("Hata: `/delvip ID`")
+        await event.respond(f"❌ {target_id} -> FREE")
+    except: await event.respond("Usage: `/delvip ID`")
 
 @bot.on(events.NewMessage(pattern='/stop'))
 async def stop_process(event):
     global STOP_PROCESS
     if event.sender_id in ADMINS:
         STOP_PROCESS = True
-        await event.respond("🛑 **İşlemler Durduruluyor...**")
+        await event.respond(T("stopped"))
 
-# --- TEKLİ İNDİRME ---
 @bot.on(events.NewMessage(pattern='/getmedia'))
-async def get_media_handler(event):
+async def get_media(event):
     user_id = event.sender_id
     if not use_right(user_id):
-        await event.respond("❌ **Hakkınız Bitti!** Admin ile görüşün."); return
+        await event.respond(T("rights_out")); return
         
-    try:
-        link = event.text.split()[1]
-    except:
-        await event.respond("⚠️ Kullanım: `/getmedia https://t.me/c/123/456`"); return
+    try: link = event.text.split()[1]
+    except: await event.respond(T("syntax_media")); return
     
-    status = await event.respond("🔍 **Aranıyor...**")
+    status = await event.respond(T("analyzing"))
     
     try:
-        entity, topic, msg_id = await parse_link(link)
+        entity, topic, msg_id, _ = await parse_link(link)
         if not entity or not msg_id:
-            await status.edit("❌ Mesaj bulunamadı!"); return
-
-        msg = await userbot.get_messages(entity, ids=msg_id)
-        if not msg:
-            await status.edit("❌ Mesaj silinmiş veya erişilemiyor."); return
-
-        # Direkt Botun olduğu sohbete at (Userbot indirip Bota atar)
-        path = await userbot.download_media(msg)
-        if path:
-            await status.edit("📤 **Yükleniyor...**")
-            await bot.send_file(
-                event.chat_id,
-                file=path,
-                caption=msg.text or ""
-            )
-            os.remove(path)
-            await status.delete()
-        else:
-            await status.edit("❌ Medya indirilemedi.")
-            
-    except Exception as e:
-        await status.edit(f"❌ Hata: {e}")
-
-# --- TOPLU TRANSFER (TRANSFER & TOPIC TRANSFER BİRLEŞİK) ---
-@bot.on(events.NewMessage(pattern='/transfer'))
-async def transfer_handler(event):
-    global STOP_PROCESS
-    user_id = event.sender_id
-    
-    # Hak Kontrolü (Toplu işlem 1 hak yer)
-    if not use_right(user_id):
-        await event.respond("❌ **Hakkınız Bitti!**"); return
-    
-    STOP_PROCESS = False
-    try:
-        args = event.message.text.split()
-        src_link = args[1]
-        dst_link = args[2]
-        limit = min(int(args[3]), 1000) # Max 1000 mesaj güvenlik için
-    except:
-        await event.respond("⚠️ **Örnek:** `/transfer [Kaynak] [Hedef] [Adet]`\nTopic linki verirsen topic'e atar.")
-        return
-
-    status = await event.respond("⚙️ **Analiz Ediliyor...**")
-
-    # Linkleri Çöz
-    src_entity, src_topic, _ = await parse_link(src_link)
-    dst_entity, dst_topic, _ = await parse_link(dst_link)
-    
-    try:
-        src_id_db = src_entity.id
-        dst_id_db = dst_entity.id
-    except:
-        await status.edit("❌ Gruplara erişilemiyor."); return
-
-    dst_info = f"📂 Topic: `{dst_topic}`" if dst_topic else "🌍 GENEL"
-    
-    await status.edit(
-        f"🚀 **TRANSFER BAŞLADI**\n"
-        f"📤 Kaynak ID: `{src_id_db}`\n"
-        f"📥 Hedef: {dst_info}\n"
-        f"📊 Hedeflenen: {limit}"
-    )
-
-    count = 0
-    skipped = 0
-    
-    # --- DÖNGÜ ---
-    try:
-        async for msg in userbot.iter_messages(src_entity, limit=limit, reply_to=src_topic):
-            if STOP_PROCESS: break
-            
-            # Hafıza Kontrolü
-            if check_history(src_id_db, msg.id, dst_id_db):
-                skipped += 1
-                continue
-            
-            # Akıllı Gönderim (Copy -> Fail -> Download)
-            success = await smart_send(msg, dst_entity, dst_topic)
-            
-            if success:
-                add_history(src_id_db, msg.id, dst_id_db)
-                count += 1
-            else:
-                # Başarısızsa (FloodWait vb. değilse)
-                pass
-            
-            # Log
-            if count % 5 == 0:
-                await status.edit(f"🔄 **Aktarılıyor...**\n✅ Başarılı: {count}\n⏭️ Zaten Vardı: {skipped}")
-            
-            await asyncio.sleep(2) # Spam koruması
-
-        final_msg = "🛑 **DURDURULDU**" if STOP_PROCESS else "🏁 **BİTTİ**"
-        await status.edit(f"{final_msg}\n✅ Toplam: {count}\n⏭️ Atlanan: {skipped}")
-
-    except Exception as e:
-        await event.respond(f"❌ Kritik Hata: {e}")
-
-# --- 8. BAŞLATMA ---
-def main():
-    print("🚀 YaelSaver V14.0 (Panel Edition) Başlatılıyor...")
-    keep_alive()
-    userbot.start()
-    bot.run_until_disconnected()
-
-if __name__ == '__main__':
-    main()
+            await status.edit(T("not_found")); return
