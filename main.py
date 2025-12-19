@@ -1,16 +1,16 @@
 import os
 import asyncio
 import sqlite3
-import random
 import logging
 from threading import Thread
 from flask import Flask
-from pyrogram import Client, filters, idle
-from pyrogram.errors import (
-    FloodWait, UserPrivacyRestricted, UserChannelsTooMuch, 
-    PeerFlood, UserNotMutualContact, UserAlreadyParticipant,
-    ChatAdminRequired, UsernameInvalid, UserBannedInChannel
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+from telethon.errors import (
+    FloodWaitError, FileReferenceExpiredError, ChatForwardsRestrictedError, 
+    UserAlreadyParticipantError, InviteHashExpiredError
 )
+from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
 
 # --- 1. AYARLAR ---
 API_ID = int(os.environ.get("API_ID", 0))
@@ -19,13 +19,13 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 ADMINS = list(map(int, os.environ.get("ADMINS", "0").split(",")))
 
-# --- 2. WEB SERVER ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("MemberAdder")
+# --- 2. LOG & WEB SERVER ---
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "MemberAdder V22.0 (Pyrogram Fix) Active! 🟢"
+def home(): return "YaelSaver V23.0 (Final) Online! 🚀"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -35,164 +35,319 @@ def keep_alive():
     t = Thread(target=run_web)
     t.start()
 
-# --- 3. DİL SİSTEMİ ---
-LANG = {
+# --- 3. DİL VE DB ---
+LANG_DATA = {
     "TR": {
-        "welcome": "👋 **MemberAdder V22.0 Hazır!**\n\nBu bot Pyrogram tabanlıdır ve Entity hatası vermez.\n\n👇 **Komut:**\n`/basla @Kaynak @Hedef 50`\n\n🛑 **Durdur:** `/stop`",
-        "analyzing": "🔍 **Gruplar Kontrol Ediliyor (Otomatik Katılım)...**",
-        "started": "🚀 **BAŞLADI**\n\n📤 **Kaynak:** {}\n📥 **Hedef:** {}\n🎯 **Limit:** {}",
-        "progress": "🔄 **İşleniyor...**\n✅: {}\n🙈 Gizli: {}\n⚠️ Zaten Var: {}\n📉 Kalan: {}",
-        "done": "✅ **BİTTİ!**\n📦 Toplam: {}\n🙈 Gizli: {}\n⚠️ Hata: {}",
-        "stopped": "🛑 **Durduruldu.**",
-        "join_err": "❌ **Hata:** Userbot gruba giremedi! Link yanlış veya banlı.",
-        "flood": "🚨 **SPAM KORUMASI:** Telegram bekletiyor ({} sn).",
-        "peer_flood": "🚨 **LİMİT DOLDU (PeerFlood):** Hesabı dinlendir."
-    }
+        "welcome": "👋 **YaelSaver V23.0 Hazır!**\n\n🇹🇷 **Dil:** Türkçe\n\n📜 **Komutlar:**\n🔹 `/transfer [Kaynak] [Hedef] [Adet]`\n🔹 `/getmedia [Link]`\n🔹 `/status`\n🔹 `/lang EN`\n\n👮‍♂️ **Admin:** `/addvip`, `/delvip`",
+        "rights_out": "❌ **Hakkınız Bitti!** Admin ile görüşün.",
+        "admin_only": "🔒 Sadece Admin yetkisiyle.",
+        "analyzing": "⚙️ **Analiz Ediliyor & Gruba Giriliyor...**",
+        "started": "🚀 **BAŞLADI**\n\n📤 **Kaynak:** {}\n📥 **Hedef:** {}\n📊 **Limit:** {}",
+        "transferring": "🔄 **Aktarılıyor...**\n✅ Başarılı: {}\n⏭️ Zaten Vardı: {}\n📉 Kalan: {}",
+        "done": "🏁 **BİTTİ!**\n\n✅ Toplam: {}\n⏭️ Atlanan: {}\n⚠️ Hatalı: {}",
+        "stopped": "🛑 **Durduruldu!**",
+        "media_ok": "✅ **İndirildi, Gönderiliyor...**",
+        "error": "❌ Hata: {}",
+        "not_found": "❌ **Erişim Hatası:** Gruba giremedim veya link hatalı.",
+        "join_ok": "✅ Gizli gruba giriş yapıldı.",
+        "syntax_trans": "⚠️ Örnek: `/transfer https://t.me/kaynak/10 https://t.me/hedef/5 100`",
+        "syntax_media": "⚠️ Örnek: `/getmedia https://t.me/c/xxxx/xxxx`"
+    },
+    "EN": { "welcome": "Ready.", "rights_out": "No rights.", "analyzing": "Analyzing...", "started": "Started", "transferring": "Progress...", "done": "Done", "stopped": "Stopped", "media_ok": "OK", "error": "Error", "not_found": "Not Found", "join_ok": "Joined", "syntax_trans": "Syntax Error", "syntax_media": "Syntax Error" }
 }
 
-# --- 4. DB ---
-DB_NAME = "adder_fix.db"
-def init_db():
-    with sqlite3.connect(DB_NAME) as conn:
-        conn.cursor().execute('''CREATE TABLE IF NOT EXISTS visited (user_id INTEGER PRIMARY KEY)''')
+DB_NAME = "yaelsaver_final.db"
 
-def is_visited(user_id):
-    with sqlite3.connect(DB_NAME) as conn:
-        res = conn.cursor().execute("SELECT user_id FROM visited WHERE user_id=?", (user_id,)).fetchone()
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, tier TEXT, rights INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS history (src_chat INTEGER, msg_id INTEGER, dst_chat INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+    conn.commit()
+    conn.close()
+
+def get_lang():
+    conn = sqlite3.connect(DB_NAME)
+    res = conn.cursor().execute("SELECT value FROM settings WHERE key='lang'").fetchone()
+    conn.close()
+    return res[0] if res else "TR"
+
+def set_lang_db(code):
+    conn = sqlite3.connect(DB_NAME)
+    conn.cursor().execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('lang', ?)", (code,))
+    conn.commit()
+    conn.close()
+
+def T(key): return LANG_DATA.get(get_lang(), LANG_DATA["TR"]).get(key, key)
+
+def check_user(user_id):
+    if user_id in ADMINS: return "ADMIN", 999999
+    conn = sqlite3.connect(DB_NAME)
+    res = conn.cursor().execute("SELECT tier, rights FROM users WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    if res: return res
+    conn = sqlite3.connect(DB_NAME)
+    conn.cursor().execute("INSERT INTO users VALUES (?, 'FREE', 3)", (user_id,))
+    conn.commit()
+    conn.close()
+    return "FREE", 3
+
+def use_right(user_id):
+    tier, rights = check_user(user_id)
+    if tier in ["ADMIN", "VIP"]: return True
+    if rights > 0:
+        conn = sqlite3.connect(DB_NAME)
+        conn.cursor().execute("UPDATE users SET rights = rights - 1 WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    return False
+
+def set_vip(user_id, status):
+    tier = "VIP" if status else "FREE"
+    rights = 99999 if status else 3
+    conn = sqlite3.connect(DB_NAME)
+    conn.cursor().execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?)", (user_id, tier, rights))
+    conn.commit()
+    conn.close()
+
+def check_history(src, msg, dst):
+    conn = sqlite3.connect(DB_NAME)
+    res = conn.cursor().execute("SELECT * FROM history WHERE src_chat=? AND msg_id=? AND dst_chat=?", (src, msg, dst)).fetchone()
+    conn.close()
     return res is not None
 
-def add_visited(user_id):
-    with sqlite3.connect(DB_NAME) as conn:
-        conn.cursor().execute("INSERT OR IGNORE INTO visited VALUES (?)", (user_id,))
+def add_history(src, msg, dst):
+    conn = sqlite3.connect(DB_NAME)
+    conn.cursor().execute("INSERT INTO history VALUES (?, ?, ?)", (src, msg, dst))
+    conn.commit()
+    conn.close()
 
-# --- 5. İSTEMCİLER ---
+# --- 4. İSTEMCİLER ---
 init_db()
-# Bot (Patron)
-bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-# Userbot (Amele)
-userbot = Client("userbot_session", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING)
+bot = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+# Auto Reconnect Aktif
+userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, connection_retries=None, auto_reconnect=True)
 
 STOP_PROCESS = False
 
-# --- 6. GRUP ÇÖZÜCÜ (HATAYI ENGELLEYEN KISIM) ---
-async def resolve_chat(client, link):
-    """Link ne olursa olsun (ID, Username, Join Link) çözer ve Chat objesi döner."""
+# --- 5. ENTITY ÇÖZÜCÜ (AKILLI JOIN SİSTEMİ) ---
+async def resolve_target(link):
+    """
+    Linki analiz eder, gerekirse gruba katılır ve Entity + Topic ID döndürür.
+    """
+    clean = link.strip().replace(" ", "")
+    entity = None
+    topic_id = None
+    
     try:
-        # Link temizle
-        clean = link.replace("https://t.me/", "").replace("@", "").strip()
-        
-        # 1. Önce Katılmayı Dene (Join Link veya Username)
-        try:
-            if "+" in clean or "joinchat" in clean:
-                await client.join_chat(clean)
-            elif not clean.replace("-","").isdigit(): # Sayı değilse username'dir
-                await client.join_chat(clean)
-        except UserAlreadyParticipant: pass # Zaten üyeyiz
-        except Exception: pass # Belki private ID'dir, katılınmaz
+        # 1. Join Link (+ veya joinchat)
+        if "+" in clean or "joinchat" in clean:
+            try:
+                hash_val = clean.split("+")[1] if "+" in clean else clean.split("joinchat/")[1]
+                # Önce katılmayı dene
+                try:
+                    await userbot(ImportChatInviteRequest(hash_val))
+                except UserAlreadyParticipantError:
+                    pass # Zaten üyeyiz
+                except InviteHashExpiredError:
+                    return None, None # Link patlak
+                
+                # Şimdi entity'i al
+                res = await userbot(CheckChatInviteRequest(hash_val))
+                if hasattr(res, 'chat'): entity = res.chat
+                elif hasattr(res, 'channel'): entity = res.channel
+            except: pass
 
-        # 2. Chat Bilgisini Al
-        chat = await client.get_chat(clean)
-        return chat
-        
+        # 2. Private Link (/c/)
+        elif "/c/" in clean:
+            try:
+                # t.me/c/123456/10
+                parts = clean.split("/c/")[1].split("/")
+                chat_id = int("-100" + parts[0])
+                entity = await userbot.get_entity(chat_id)
+                # Topic ID kontrolü
+                if len(parts) > 1 and parts[1].isdigit():
+                    topic_id = int(parts[1])
+            except: pass # Erişim yoksa entity None döner
+
+        # 3. Public Link (@)
+        else:
+            try:
+                parts = clean.split("t.me/")[-1].split("/")
+                username = parts[0]
+                entity = await userbot.get_entity(username)
+                if len(parts) > 1 and parts[1].isdigit():
+                    topic_id = int(parts[1])
+            except: pass
+            
+        return entity, topic_id
+
     except Exception as e:
-        logger.error(f"Chat Resolve Error: {e}")
-        return None
+        logger.error(f"Resolve Error: {e}")
+        return None, None
+
+# --- 6. AKTARIM MOTORU ---
+async def smart_send(msg, dst_entity, dst_topic):
+    try:
+        # 1. Temiz Kopya (İletildi yazısı olmadan)
+        if msg.media:
+            await userbot.send_file(dst_entity, file=msg.media, caption=msg.text or "", reply_to=dst_topic, force_document=False)
+        elif msg.text:
+            await userbot.send_message(dst_entity, msg.text, reply_to=dst_topic)
+        return True
+    except (ChatForwardsRestrictedError, FileReferenceExpiredError):
+        # 2. Yasaklıysa İndir & Yükle
+        path = None
+        try:
+            path = await userbot.download_media(msg)
+            if path:
+                await userbot.send_file(dst_entity, file=path, caption=msg.text or "", reply_to=dst_topic, force_document=False)
+                os.remove(path)
+                return True
+        except:
+            if path and os.path.exists(path): os.remove(path)
+    except: pass
+    return False
 
 # --- 7. KOMUTLAR ---
-@bot.on_message(filters.command("start") & filters.private)
-async def start_handler(client, message):
-    await message.reply(LANG["TR"]["welcome"])
 
-@bot.on_message(filters.command("stop") & filters.private)
-async def stop_handler(client, message):
+@bot.on(events.NewMessage(pattern='/start'))
+async def start(event):
+    check_user(event.sender_id)
+    await event.respond(T("welcome"))
+
+@bot.on(events.NewMessage(pattern='/lang'))
+async def lang_cmd(event):
+    if event.sender_id not in ADMINS: return
+    try:
+        target = event.text.split()[1].upper()
+        if target in ["TR", "EN"]:
+            set_lang_db(target)
+            await event.respond(f"Language: {target}")
+    except: await event.respond("/lang TR | EN")
+
+@bot.on(events.NewMessage(pattern='/status'))
+async def status(event):
+    tier, rights = check_user(event.sender_id)
+    await event.respond(f"📊 **Durum:**\n👑 {tier}\n🎫 {rights}")
+
+@bot.on(events.NewMessage(pattern='/addvip'))
+async def add_vip(event):
+    if event.sender_id not in ADMINS: return
+    try:
+        set_vip(int(event.text.split()[1]), True)
+        await event.respond("✅ VIP")
+    except: pass
+
+@bot.on(events.NewMessage(pattern='/delvip'))
+async def del_vip(event):
+    if event.sender_id not in ADMINS: return
+    try:
+        set_vip(int(event.text.split()[1]), False)
+        await event.respond("❌ FREE")
+    except: pass
+
+@bot.on(events.NewMessage(pattern='/stop'))
+async def stop_cmd(event):
     global STOP_PROCESS
-    if message.from_user.id in ADMINS:
+    if event.sender_id in ADMINS:
         STOP_PROCESS = True
-        await message.reply(LANG["TR"]["stopped"])
+        await event.respond(T("stopped"))
 
-@bot.on_message(filters.command("basla") & filters.private)
-async def start_adding(client, message):
-    global STOP_PROCESS
-    user_id = message.from_user.id
-    if user_id not in ADMINS: return # Basitlik için sadece admin
+@bot.on(events.NewMessage(pattern='/getmedia'))
+async def get_media(event):
+    user_id = event.sender_id
+    if not use_right(user_id):
+        await event.respond(T("rights_out")); return
+    
+    try: link = event.text.split()[1]
+    except: await event.respond(T("syntax_media")); return
+    
+    status = await event.respond(T("analyzing"))
     
     try:
-        # /basla kaynak hedef 50
-        src_link = message.command[1]
-        dst_link = message.command[2]
-        limit = int(message.command[3])
-    except:
-        await message.reply("⚠️ Hatalı! Örnek: `/basla @kaynak @hedef 50`")
-        return
-
-    status = await message.reply(LANG["TR"]["analyzing"])
-    STOP_PROCESS = False
-
-    # GRUPLARI ÇÖZ (Userbot Tarafında)
-    src_chat = await resolve_chat(userbot, src_link)
-    dst_chat = await resolve_chat(userbot, dst_link)
-
-    if not src_chat or not dst_chat:
-        await status.edit(LANG["TR"]["join_err"])
-        return
-
-    await status.edit(LANG["TR"]["started"].format(src_chat.title, dst_chat.title, limit))
-
-    # Üye Listesi
-    members = []
-    try:
-        async for m in userbot.get_chat_members(src_chat.id, limit=limit + 150):
-            if not m.user.is_bot and not m.user.is_deleted and not is_visited(m.user.id):
-                members.append(m.user)
+        # Basit ID Çözümleme (Manuel)
+        if '/c/' in link:
+            parts = link.split('/c/')[1].split('/')
+            chat_id = int("-100" + parts[0])
+            msg_id = int(parts[-1])
+            entity = await userbot.get_entity(chat_id)
+        else:
+            parts = link.split('/')
+            msg_id = int(parts[-1])
+            entity = await userbot.get_entity(parts[-2])
+            
+        msg = await userbot.get_messages(entity, ids=msg_id)
+        path = await userbot.download_media(msg)
+        if path:
+            await status.edit(T("media_ok"))
+            await bot.send_file(event.chat_id, file=path, caption=msg.text or "")
+            os.remove(path)
+            await status.delete()
+        else:
+            await status.edit(T("error").format("No Media"))
     except Exception as e:
-        await status.edit(f"❌ Liste Hatası: {e}"); return
+        await status.edit(T("error").format(e))
 
-    # Döngü
-    count = 0
-    privacy = 0
-    already = 0
+@bot.on(events.NewMessage(pattern='/transfer'))
+async def transfer(event):
+    global STOP_PROCESS
+    user_id = event.sender_id
+    if not use_right(user_id):
+        await event.respond(T("rights_out")); return
     
-    for user in members:
-        if STOP_PROCESS or count >= limit: break
+    STOP_PROCESS = False
+    try:
+        args = event.message.text.split()
+        src_link, dst_link, limit = args[1], args[2], min(int(args[3]), 2000)
+    except:
+        await event.respond(T("syntax_trans")); return
 
-        try:
-            await userbot.add_chat_members(dst_chat.id, user.id)
-            add_visited(user.id)
-            count += 1
+    status = await event.respond(T("analyzing"))
+
+    src_entity, src_topic = await resolve_target(src_link)
+    dst_entity, dst_topic = await resolve_target(dst_link)
+    
+    if not src_entity or not dst_entity:
+        await status.edit(T("not_found")); return
+
+    await status.edit(T("started").format(src_entity.title, dst_entity.title, limit))
+
+    count = 0
+    skipped = 0
+    
+    try:
+        async for msg in userbot.iter_messages(src_entity, limit=limit, reply_to=src_topic):
+            if STOP_PROCESS: break
+            
+            if check_history(src_entity.id, msg.id, dst_entity.id):
+                skipped += 1
+                continue
+            
+            if await smart_send(msg, dst_entity, dst_topic):
+                add_history(src_entity.id, msg.id, dst_entity.id)
+                count += 1
             
             if count % 5 == 0:
-                await status.edit(LANG["TR"]["progress"].format(count, privacy, already, limit - count))
-            
-            # Rastgele Bekleme (Güvenlik)
-            await asyncio.sleep(random.randint(20, 40))
+                await status.edit(T("transferring").format(count, skipped, limit - count))
+            await asyncio.sleep(2)
 
-        except PeerFlood:
-            await status.edit(LANG["TR"]["peer_flood"])
-            return
-        except UserPrivacyRestricted:
-            privacy += 1
-            add_visited(user.id)
-        except UserAlreadyParticipant:
-            already += 1
-            add_visited(user.id)
-        except FloodWait as e:
-            await status.edit(LANG["TR"]["flood"].format(e.value))
-            await asyncio.sleep(e.value + 5)
-        except Exception as e:
-            add_visited(user.id)
-            # Kritik olmayan hataları pas geç
+        final_msg = T("stopped") if STOP_PROCESS else T("done").format(count, skipped, 0)
+        await status.edit(final_msg)
 
-    await status.edit(LANG["TR"]["done"].format(count, privacy, already))
+    except FloodWaitError as e:
+        await status.edit(f"⏳ **FloodWait:** {e.seconds}s.")
+        await asyncio.sleep(e.seconds)
+    except Exception as e:
+        await event.respond(T("error").format(e))
 
-# --- BAŞLATMA ---
 def main():
-    print("🚀 V22.0 Started...")
+    print("🚀 V23.0 Started...")
     keep_alive()
     userbot.start()
-    bot.start()
-    idle()
-    userbot.stop()
-    bot.stop()
+    bot.run_until_disconnected()
 
 if __name__ == '__main__':
     main()
