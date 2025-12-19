@@ -1,4 +1,4 @@
-telethon
+pyrogram
+tgcrypto
 flask
-asyncio
 pysqlite3
