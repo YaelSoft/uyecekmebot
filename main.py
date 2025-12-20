@@ -1,384 +1,369 @@
 import os
 import asyncio
-import threading
 import sqlite3
-import time
-import sys
-from datetime import datetime
-from telethon import TelegramClient, events, Button, functions, types
-from telethon.sessions import StringSession
-from telethon.tl.functions.messages import ImportChatInviteRequest
-from telethon.tl.functions.channels import LeaveChannelRequest, GetParticipantRequest
-from telethon.errors import FloodWaitError, UserAlreadyParticipantError, UserNotParticipantError
+import logging
+from threading import Thread
 from flask import Flask
+from pyrogram import Client, filters, idle
+from pyrogram.errors import (
+    FloodWait, UserPrivacyRestricted, UserAlreadyParticipant,
+    InviteHashExpired, UsernameInvalid, ChannelPrivate, PeerFlood
+)
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- 1. RENDER WEB SUNUCUSU ---
-app = Flask(__name__)
-@app.route('/')
-def home(): return "YaelSaver System Active!"
-def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-# --- 2. AYARLAR ---
-API_ID = int(os.environ.get("API_ID", "0"))
+# --- 1. AYARLAR ---
+API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
-ADMINS = list(map(int, os.environ.get("ALLOWED_USERS", "").split(","))) if os.environ.get("ALLOWED_USERS") else []
-OWNER_CONTACT = "@yasin33" 
+ADMINS = list(map(int, os.environ.get("ADMINS", "0").split(",")))
 
-# ZORUNLU ABONELİK KANALI (Kullanıcı Adı veya ID)
-# Eğer boş bırakırsan özellik devre dışı kalır.
-# Örnek: "@YaelCode" veya "-10012345678"
-FSUB_CHANNEL = os.environ.get("FSUB_CHANNEL", "") 
+# --- 2. WEB SERVER ---
+logging.basicConfig(level=logging.INFO)
+app = Flask(__name__)
 
-START_TIME = time.time()
+@app.route('/')
+def home(): return "YaelSaver V26.0 Active! 🟢"
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.start()
 
 # --- 3. DİL VE METİNLER ---
-TEXTS = {
-    "en": {
-        "welcome": "👋 **Welcome!**\nSelect Language:",
-        "lang_set": "✅ Language set to **English**.",
-        "menu_free": "👤 **FREE DASHBOARD**\n\n🆔 ID: `{uid}`\n📊 Limit: **{limit}/3**\n💎 Status: **Free**\n\n📥 **Usage:**\n1. **Public:** Send Link.\n2. **Private:** Send Invite Link -> Then Post Link.\n\n🚀 **Upgrade to VIP for:**\n✅ Unlimited Access\n✅ Batch (`/range`)\n✅ Priority Speed\n\n🛒 **Buy VIP:** {contact}",
-        "menu_vip": "💎 **VIP DASHBOARD**\n\n🆔 ID: `{uid}`\n⚡ **Status: UNLIMITED**\n\n🔥 **VIP Features:**\n• `/range link 100-150` -> Batch DL\n• `/transfer src dst count` -> Clone\n\n📥 **Usage:** Send any link!",
-        "menu_admin": "👑 **BOSS PANEL**\n\n⚡ **Status: GOD MODE**\n\n👥 **Manage:**\n• `/vip ID`\n• `/unvip ID`\n• `/stats`\n\n🛠 **Tools:**\n• `/transfer`\n• `/leave link`\n• `/killall`",
-        "limit_reached": f"⛔ **Limit Reached!**\nContact **{OWNER_CONTACT}** for VIP.",
-        "queue": "⏳ **Queued (5s)...**",
-        "processing": "🔄 **Processing...**",
-        "downloading": "⬇️ **Downloading...**",
-        "uploading": "⬆️ **Uploading...**",
-        "join_success": "✅ **Joined!** Now send link.",
-        "join_fail": "❌ Failed to join.",
-        "error_access": "❌ **Access Denied!**\nPrivate Channel. Send **Invite Link** (`t.me/+...`) first.",
-        "vip_only": "🔒 **VIP Feature Only!**",
-        "left_channel": "👋 **Left the channel.**",
-        "fsub_msg": "⛔ **Access Denied!**\n\nYou must join our channel to use this bot.\n\n👇 **Join Here:**",
-        "fsub_btn": "📢 Join Channel",
-        "fsub_done": "✅ I Joined!",
-        "vip_promoted": "🌟 **You are now VIP!**",
-        "vip_removed": "❌ **VIP Removed.**",
-        "restart_msg": "🔴 **System Restarting...**"
+LANG = {
+    "TR": {
+        "welcome": "👋 **YaelSaver Sistemine Hoşgeldiniz!**\n\n🇹🇷 **Dil:** Türkçe\n\n👇 **Menü:**",
+        "menu_get": "📥 Medya İndir",
+        "menu_trans": "♻️ Transfer Yap",
+        "menu_acc": "👤 Hesabım",
+        "menu_lang": "🇺🇸 English",
+        "free_limit": "❌ **Ücretsiz Limit Aşıldı!**\nFree üyeler günlük 10 medya indirebilir. Transfer yapamaz.\nVIP almak için yöneticiye yazın.",
+        "rights_out": "❌ **Hakkınız Bitti!**",
+        "analyzing": "🔍 **Bağlantı Kontrol Ediliyor...**",
+        "media_dl": "📥 **İndiriliyor...**",
+        "media_ul": "📤 **Yükleniyor...**",
+        "not_found": "❌ **Hata:** İçerik bulunamadı veya gruba erişilemiyor!\nLinkin doğru olduğundan emin olun.",
+        "error": "❌ Hata: {}",
+        "syntax_get": "⚠️ **Kullanım:** `/getmedia https://t.me/c/xxxx/xxxx`",
+        "syntax_trans": "⚠️ **Kullanım:** `/transfer [Kaynak] [Hedef] [Adet]`",
+        "started": "🚀 **TRANSFER BAŞLADI**\n📤 Kaynak: {}\n📥 Hedef: {}\n📊 Adet: {}",
+        "stopped": "🛑 **Durduruldu.**",
+        "done": "✅ **TAMAMLANDI**"
     },
-    "de": {
-        "welcome": "👋 **Willkommen!**\nSprache wählen:",
-        "lang_set": "✅ Sprache: **Deutsch**.",
-        "menu_free": "👤 **GRATIS MENÜ**\n\n🆔 ID: `{uid}`\n📊 Limit: **{limit}/3**\n💎 Status: **Gratis**\n\n📥 **Nutzung:**\n1. **Öffentlich:** Link senden.\n2. **Privat:** Einladungslink -> Dann Beitragslink.\n\n🚀 **VIP Vorteile:**\n✅ Unbegrenzt\n✅ Massen-DL (`/range`)\n\n🛒 **VIP Kaufen:** {contact}",
-        "menu_vip": "💎 **VIP MENÜ**\n\n🆔 ID: `{uid}`\n⚡ **Status: UNBEGRENZT**\n\n🔥 **VIP Befehle:**\n• `/range link 100-150` -> Massen-DL\n• `/transfer` -> Klonen\n\n📥 **Nutzung:** Link senden!",
-        "menu_admin": "👑 **CHEF PANEL**\n\n⚡ **Status: GOD MODE**\n\n👥 **Verwaltung:**\n• `/vip ID`\n• `/unvip ID`\n• `/stats`\n\n🛠 **Tools:**\n• `/transfer`\n• `/leave link`\n• `/killall`",
-        "limit_reached": f"⛔ **Limit erreicht!**\nKontaktieren Sie **{OWNER_CONTACT}** für VIP.",
-        "queue": "⏳ **Warte (5s)...**",
-        "processing": "🔄 **Verarbeitung...**",
-        "downloading": "⬇️ **Herunterladen...**",
-        "uploading": "⬆️ **Hochladen...**",
-        "join_success": "✅ **Beigetreten!** Link senden.",
-        "join_fail": "❌ Fehler beim Beitritt.",
-        "error_access": "❌ **Zugriff verweigert!**\nPrivat. Senden Sie erst den **Einladungslink** (`t.me/+...`).",
-        "vip_only": "🔒 **Nur für VIP!**",
-        "left_channel": "👋 **Kanal verlassen.**",
-        "fsub_msg": "⛔ **Zugriff verweigert!**\n\nBitte treten Sie unserem Kanal bei.",
-        "fsub_btn": "📢 Kanal beitreten",
-        "fsub_done": "✅ Beigetreten!",
-        "vip_promoted": "🌟 **Sie sind jetzt VIP!**",
-        "vip_removed": "❌ **VIP entfernt.**",
-        "restart_msg": "🔴 **Neustart...**"
-    },
-    "tr": {
-        "welcome": "👋 **Hoş Geldiniz!**\nDil seçiniz:",
-        "lang_set": "✅ Dil: **Türkçe**.",
-        "menu_free": "👤 **ÜCRETSİZ PANEL**\n\n🆔 ID: `{uid}`\n📊 Hak: **{limit}/3**\n💎 Durum: **Ücretsiz**\n\n📥 **Kullanım:**\n1. **Normal:** Link gönder.\n2. **Gizli:** Önce Davet Linki -> Sonra Mesaj Linki.\n\n🚀 **VIP Özellikleri:**\n✅ Sınırsız İndirme\n✅ Toplu İndirme (`/range`)\n✅ Öncelikli Hız\n\n🛒 **VIP Satın Al:** {contact}",
-        "menu_vip": "💎 **VIP PANELİ**\n\n🆔 ID: `{uid}`\n⚡ **Durum: SINIRSIZ**\n\n🔥 **VIP Komutları:**\n• `/range link 100-150` -> Toplu İndir\n• `/transfer` -> Kanal Kopyala\n\n📥 **Kullanım:** Link göndermen yeterli!",
-        "menu_admin": "👑 **PATRON PANELİ**\n\n⚡ **Durum: YÖNETİCİ**\n\n👥 **Kullanıcı Yönetimi:**\n• `/vip ID` -> VIP Yap\n• `/unvip ID` -> İptal Et\n• `/stats` -> İstatistikler\n\n🛠 **Araçlar:**\n• `/transfer`\n• `/leave link` -> Gruptan Çık\n• `/killall` -> Yeniden Başlat",
-        "limit_reached": f"⛔ **Günlük Hak Bitti!**\nSınırsız için **{OWNER_CONTACT}** ile görüşün.",
-        "queue": "⏳ **Sırada (5sn)...**",
-        "processing": "🔄 **İşleniyor...**",
-        "downloading": "⬇️ **İndiriliyor...**",
-        "uploading": "⬆️ **Yükleniyor...**",
-        "join_success": "✅ **Girdim!** Şimdi linki at.",
-        "join_fail": "❌ Gruba girilemedi.",
-        "error_access": "❌ **Erişemiyorum!**\nBu gizli bir grup.\n💡 Önce **Davet Linkini** (`t.me/+...`) at.",
-        "vip_only": "🔒 **Sadece VIP!**",
-        "left_channel": "👋 **Kanaldan çıkıldı.**",
-        "fsub_msg": "⛔ **Erişim Engellendi!**\n\nBotu kullanmak için kanalımıza katılmalısınız.\n\n👇 **Buradan Katıl:**",
-        "fsub_btn": "📢 Kanala Katıl",
-        "fsub_done": "✅ Katıldım!",
-        "vip_promoted": "🌟 **Artık VIP Üyesiniz!**",
-        "vip_removed": "❌ **VIP İptal Edildi.**",
-        "restart_msg": "🔴 **Sistem Yeniden Başlatılıyor...**"
+    "EN": {
+        "welcome": "👋 **Welcome to YaelSaver!**\n\n🇺🇸 **Lang:** English\n\n👇 **Menu:**",
+        "menu_get": "📥 Get Media",
+        "menu_trans": "♻️ Transfer",
+        "menu_acc": "👤 Account",
+        "menu_lang": "🇹🇷 Türkçe",
+        "free_limit": "❌ **Free Limit Reached!**\nFree users: 10 medias/day. No Transfer.\nContact admin for VIP.",
+        "rights_out": "❌ **No Credits!**",
+        "analyzing": "🔍 **Checking Link...**",
+        "media_dl": "📥 **Downloading...**",
+        "media_ul": "📤 **Uploading...**",
+        "not_found": "❌ **Error:** Content not found or access denied.",
+        "error": "❌ Error: {}",
+        "syntax_get": "⚠️ **Usage:** `/getmedia [Link]`",
+        "syntax_trans": "⚠️ **Usage:** `/transfer [Src] [Dst] [Limit]`",
+        "started": "🚀 **STARTED**\n📤 Src: {}\n📥 Dst: {}\n📊 Limit: {}",
+        "stopped": "🛑 **Stopped.**",
+        "done": "✅ **DONE**"
     }
 }
 
-# --- 4. İSTEMCİLER ---
-bot = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
-userbot = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+# --- 4. VERİTABANI ---
+DB_NAME = "yaelsaver_v26.db"
 
-# --- 5. VERİTABANI ---
 def init_db():
-    conn = sqlite3.connect('musteri.db', check_same_thread=False)
-    conn.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (user_id INTEGER PRIMARY KEY, is_vip INTEGER DEFAULT 0, daily_limit INTEGER DEFAULT 3, last_reset TEXT, lang TEXT DEFAULT 'en')''')
-    conn.commit(); conn.close()
+    with sqlite3.connect(DB_NAME) as conn:
+        c = conn.cursor()
+        # rights: Günlük kalan hak (Free için 10, VIP için 9999)
+        c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, tier TEXT, rights INTEGER)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+        conn.commit()
 
-def get_user(user_id):
-    conn = sqlite3.connect('musteri.db', check_same_thread=False)
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    user = c.fetchone()
-    today = datetime.now().strftime("%Y-%m-%d")
+def get_text(key, lang="TR"):
+    return LANG.get(lang, LANG["TR"]).get(key, key)
 
-    if user is None:
-        c.execute("INSERT INTO users (user_id, last_reset, lang) VALUES (?, ?, ?)", (user_id, today, 'en'))
-        conn.commit(); conn.close(); return (user_id, 0, 3, today, 'en')
+def get_user_lang():
+    with sqlite3.connect(DB_NAME) as conn:
+        res = conn.cursor().execute("SELECT value FROM settings WHERE key='lang'").fetchone()
+    return res[0] if res else "TR"
+
+def set_user_lang(lang):
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.cursor().execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('lang', ?)", (lang,))
+
+def check_user(user_id):
+    if user_id in ADMINS: return "ADMIN", 999999
+    with sqlite3.connect(DB_NAME) as conn:
+        res = conn.cursor().execute("SELECT tier, rights FROM users WHERE user_id=?", (user_id,)).fetchone()
+    if res: return res
+    # YENİ ÜYE: FREE, 10 HAK
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.cursor().execute("INSERT INTO users VALUES (?, 'FREE', 10)", (user_id,))
+    return "FREE", 10
+
+def use_right(user_id, cost=1):
+    tier, rights = check_user(user_id)
+    if tier in ["ADMIN", "VIP"]: return True
     
-    if user[3] != today and user[1] == 0:
-        c.execute("UPDATE users SET daily_limit=3, last_reset=? WHERE user_id=?", (today, user_id))
-        conn.commit(); conn.close(); return (user_id, 0, 3, today, user[4])
-        
-    conn.close(); return user
-
-def update_lang(user_id, lang_code):
-    conn = sqlite3.connect('musteri.db', check_same_thread=False)
-    conn.execute("UPDATE users SET lang=? WHERE user_id=?", (lang_code, user_id))
-    conn.commit(); conn.close()
-
-def use_right(user_id):
-    conn = sqlite3.connect('musteri.db', check_same_thread=False)
-    conn.execute("UPDATE users SET daily_limit = daily_limit - 1 WHERE user_id=?", (user_id,))
-    conn.commit(); conn.close()
+    # Free üyeler Transfer kullanamaz (Sadece getmedia)
+    if cost > 1 and tier == "FREE": return False 
+    
+    if rights >= cost:
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.cursor().execute("UPDATE users SET rights = rights - ? WHERE user_id=?", (cost, user_id))
+        return True
+    return False
 
 def set_vip(user_id, status):
-    conn = sqlite3.connect('musteri.db', check_same_thread=False)
-    conn.execute("UPDATE users SET is_vip=? WHERE user_id=?", (status, user_id))
-    conn.commit(); conn.close()
+    tier, rights = ("VIP", 99999) if status else ("FREE", 10)
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.cursor().execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?)", (user_id, tier, rights))
 
-def get_stats():
-    conn = sqlite3.connect('musteri.db', check_same_thread=False)
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users")
-    total = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM users WHERE is_vip=1")
-    vips = c.fetchone()[0]
-    conn.close()
-    return total, vips
+# --- 5. İSTEMCİLER ---
+init_db()
+bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+userbot = Client("userbot_session", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING)
+STOP_PROCESS = False
 
-# --- YARDIMCI: ZORUNLU ABONELİK KONTROLÜ ---
-async def check_fsub(uid, lang):
-    if not FSUB_CHANNEL or uid in ADMINS: return True
+# --- 6. GELİŞMİŞ LINK ÇÖZÜCÜ (NoneType Hatasını Çözen Kısım) ---
+async def resolve_link_details(client, link):
+    """
+    Linki analiz eder: Chat Objesi ve Mesaj ID döndürür.
+    Otomatik join yapar.
+    """
+    clean = link.strip().replace("https://t.me/", "").replace("@", "")
+    chat = None
+    msg_id = None
+    
     try:
-        participant = await bot(GetParticipantRequest(FSUB_CHANNEL, uid))
-        return True
-    except UserNotParticipantError:
-        # Link oluştur (Eğer @kullaniciadi ise direkt link, ID ise davet linki gerekir)
-        if str(FSUB_CHANNEL).startswith("@"):
-            link = f"https://t.me/{FSUB_CHANNEL.replace('@','')}"
-        else:
-            # ID ile çalışmak zordur, public username tavsiye edilir.
-            link = f"https://t.me/joinchat/{FSUB_CHANNEL}" # Bu kısım değişkendir
+        # Mesaj ID'sini bul (Linkin en sonundaki sayı)
+        parts = clean.split("/")
+        if parts[-1].isdigit():
+            msg_id = int(parts[-1])
+        
+        # Chat'i Bul
+        # 1. Join Link (+ veya joinchat)
+        if "+" in clean or "joinchat" in clean:
+            # Join linklerde mesaj ID olmaz genelde ama link yapısı bozulmasın diye join kısmını ayıralım
+            join_part = clean
+            if msg_id:
+                # Linkin sonundaki /123 kısmını atıp sadece hash'i alalım
+                join_part = clean.rsplit('/', 1)[0]
+                
+            try: await client.join_chat(join_part)
+            except UserAlreadyParticipant: pass
+            chat = await client.get_chat(join_part)
+
+        # 2. Private Link (/c/)
+        elif "c/" in clean:
+            # c/123456789/10
+            # Chat ID: -100 + 123456789
+            chat_id_str = clean.split("c/")[1].split("/")[0]
+            chat_id = int("-100" + chat_id_str)
             
-        buttons = [
-            [Button.url(TEXTS[lang]['fsub_btn'], link)],
-            [Button.inline(TEXTS[lang]['fsub_done'], b"check_fsub")]
-        ]
-        await bot.send_message(uid, TEXTS[lang]['fsub_msg'], buttons=buttons)
-        return False
-    except:
-        return True # Hata olursa engelleme (Güvenlik)
+            # Gruba girmeyi dene (Eğer ID ile girilmiyorsa yapacak bir şey yok, userbot zaten içinde olmalı)
+            try: chat = await client.get_chat(chat_id)
+            except: pass
 
-# --- 6. GİRİŞ VE MENÜ ---
-@bot.on(events.NewMessage(pattern='/start'))
-async def start(event):
-    uid = event.sender_id
-    u = get_user(uid)
-    buttons = [
-        [Button.inline("🇺🇸 English", b"set_lang_en"), Button.inline("🇩🇪 Deutsch", b"set_lang_de")],
-        [Button.inline("🇹🇷 Türkçe", b"set_lang_tr")]
-    ]
-    await event.respond(TEXTS['en']['welcome'], buttons=buttons)
-
-@bot.on(events.CallbackQuery(pattern=b"set_lang_"))
-async def callback_handler(event):
-    lang_code = event.data.decode().split("_")[-1] 
-    uid = event.sender_id
-    update_lang(uid, lang_code)
-    
-    # Dil seçildi, şimdi FSub kontrolü
-    if not await check_fsub(uid, lang_code):
-        return # Üye değilse durdur
-
-    u = get_user(uid)
-    vip = u[1] == 1
-    
-    if uid in ADMINS: msg = TEXTS[lang_code]['menu_admin']
-    elif vip: msg = TEXTS[lang_code]['menu_vip'].format(uid=uid)
-    else: msg = TEXTS[lang_code]['menu_free'].format(uid=uid, limit=u[2], contact=OWNER_CONTACT)
-    await event.edit(msg)
-
-@bot.on(events.CallbackQuery(pattern=b"check_fsub"))
-async def fsub_check_handler(event):
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4]
-    
-    if await check_fsub(uid, lang):
-        # Üye olmuş, menüyü göster
-        vip = u[1] == 1
-        if uid in ADMINS: msg = TEXTS[lang]['menu_admin']
-        elif vip: msg = TEXTS[lang]['menu_vip'].format(uid=uid)
-        else: msg = TEXTS[lang]['menu_free'].format(uid=uid, limit=u[2], contact=OWNER_CONTACT)
-        await event.edit(msg)
-    else:
-        # Hala üye değil
-        await event.answer("❌ Not Joined!", alert=True)
-
-@bot.on(events.NewMessage(pattern='/help'))
-async def help_cmd(event):
-    await event.respond(f"🆘 **Support:** Contact {OWNER_CONTACT}")
-
-# --- 7. ADMIN KOMUTLARI ---
-@bot.on(events.NewMessage(pattern='/stats'))
-async def stats(event):
-    if event.sender_id not in ADMINS: return
-    total, vips = get_stats()
-    uptime = time.time() - START_TIME
-    msg = f"📊 **Stats**\nUsers: `{total}`\nVIPs: `{vips}`\nUptime: `{int(uptime//3600)}h`"
-    await event.respond(msg)
-
-@bot.on(events.NewMessage(pattern='/killall'))
-async def killall(event):
-    if event.sender_id not in ADMINS: return
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4] if u[4] in TEXTS else 'en'
-    await event.respond(TEXTS[lang]['restart_msg'])
-    os._exit(0)
-
-@bot.on(events.NewMessage(pattern='/vip'))
-async def vip_add(event):
-    if event.sender_id not in ADMINS: return
-    try:
-        t = int(event.message.text.split()[1])
-        set_vip(t, 1)
-        await event.respond(f"✅ {t} VIP.")
-    except: await event.respond("Usage: `/vip ID`")
-
-@bot.on(events.NewMessage(pattern='/unvip'))
-async def vip_rem(event):
-    if event.sender_id not in ADMINS: return
-    try:
-        t = int(event.message.text.split()[1])
-        set_vip(t, 0)
-        await event.respond(f"❌ {t} Normal.")
-    except: pass
-
-@bot.on(events.NewMessage(pattern='/leave'))
-async def leave_channel(event):
-    if event.sender_id not in ADMINS: return
-    try:
-        args = event.message.text.split()
-        link = args[1]
-        if 't.me/c/' in link: entity = await userbot.get_entity(int('-100' + link.split('/')[-2]))
-        else: entity = await userbot.get_entity(link.split('/')[-1])
-        await userbot(LeaveChannelRequest(entity))
-        await event.respond("👋 Left.")
-    except: await event.respond("❌ Error.")
-
-# --- 8. VIP ÖZELLİKLERİ ---
-
-# A) RANGE DOWNLOAD
-@bot.on(events.NewMessage(pattern='/range'))
-async def range_dl(event):
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4]
-    
-    # FSub Kontrolü
-    if not await check_fsub(uid, lang): return
-
-    if uid not in ADMINS and u[1] == 0:
-        await event.respond(TEXTS[lang]['vip_only'])
-        return
-    await event.respond("Range Active.")
-
-# B) TRANSFER
-@bot.on(events.NewMessage(pattern='/transfer'))
-async def transfer_dl(event):
-    uid = event.sender_id
-    u = get_user(uid)
-    lang = u[4]
-    if uid not in ADMINS and u[1] == 0:
-        await event.respond(TEXTS[lang]['vip_only'])
-        return
-    await event.respond("Transfer Active.")
-
-
-# --- 9. GENEL İNDİRİCİ ---
-@bot.on(events.NewMessage)
-async def downloader(event):
-    if not event.is_private or event.message.text.startswith('/'): return
-    
-    uid = event.sender_id
-    u = get_user(uid)
-    vip = u[1] == 1
-    limit = u[2]
-    lang = u[4] if u[4] in TEXTS else 'en'
-    
-    # 1. ZORUNLU ABONELİK KONTROLÜ
-    if not await check_fsub(uid, lang): return
-
-    # 2. HAK KONTROLÜ
-    if uid not in ADMINS:
-        if not vip:
-            if limit <= 0:
-                await event.respond(TEXTS[lang]['limit_reached'])
-                return
-            status = await event.respond(TEXTS[lang]['queue'])
-            await asyncio.sleep(4)
+        # 3. Public Username
         else:
-            status = await event.respond(TEXTS[lang]['processing'])
-    else:
-        status = await event.respond(TEXTS[lang]['processing'])
+            # username/10
+            username = parts[0]
+            try: await client.join_chat(username)
+            except: pass
+            chat = await client.get_chat(username)
+            
+        return chat, msg_id
 
-    text = event.message.text.strip()
+    except Exception as e:
+        print(f"Resolve Error: {e}")
+        return None, None
+
+# --- 7. KOMUTLAR ---
+
+@bot.on_message(filters.command("start") & filters.private)
+async def start_handler(client, message):
+    lang = get_user_lang()
+    check_user(message.from_user.id)
+    
+    # Butonlar
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton(get_text("menu_get", lang), callback_data="btn_get"),
+         InlineKeyboardButton(get_text("menu_trans", lang), callback_data="btn_trans")],
+        [InlineKeyboardButton(get_text("menu_acc", lang), callback_data="btn_acc"),
+         InlineKeyboardButton(get_text("menu_lang", lang), callback_data="btn_lang")]
+    ])
+    await message.reply(get_text("welcome", lang), reply_markup=buttons)
+
+@bot.on_callback_query()
+async def cb_handler(client, callback):
+    data = callback.data
+    user_id = callback.from_user.id
+    lang = get_user_lang()
+    
+    if data == "btn_lang":
+        new_lang = "EN" if lang == "TR" else "TR"
+        set_user_lang(new_lang)
+        await callback.answer("Language Changed / Dil Değişti")
+        # Menüyü Yenile
+        new_text = get_text("welcome", new_lang)
+        new_buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton(get_text("menu_get", new_lang), callback_data="btn_get"),
+             InlineKeyboardButton(get_text("menu_trans", new_lang), callback_data="btn_trans")],
+            [InlineKeyboardButton(get_text("menu_acc", new_lang), callback_data="btn_acc"),
+             InlineKeyboardButton(get_text("menu_lang", new_lang), callback_data="btn_lang")]
+        ])
+        await callback.message.edit(new_text, reply_markup=new_buttons)
+        
+    elif data == "btn_acc":
+        tier, rights = check_user(user_id)
+        text = f"👤 **Hesap:**\n👑 Plan: {tier}\n🎫 Hak: {rights}"
+        await callback.answer(text, show_alert=True)
+        
+    elif data == "btn_get":
+        await callback.message.reply(get_text("syntax_get", lang))
+        
+    elif data == "btn_trans":
+        tier, _ = check_user(user_id)
+        if tier == "FREE":
+            await callback.answer(get_text("free_limit", lang), show_alert=True)
+        else:
+            await callback.message.reply(get_text("syntax_trans", lang))
+
+# --- GETMEDIA (TEKLİ İNDİRME) ---
+@bot.on_message(filters.command("getmedia") & filters.private)
+async def getmedia_cmd(client, message):
+    user_id = message.from_user.id
+    lang = get_user_lang()
+    
+    # Free üye 1 hak yer
+    if not use_right(user_id, cost=1):
+        await message.reply(get_text("free_limit", lang)); return
+
+    try: link = message.command[1]
+    except: await message.reply(get_text("syntax_get", lang)); return
+    
+    status = await message.reply(get_text("analyzing", lang))
     
     try:
-        if "t.me/+" in text:
-            try:
-                await userbot(ImportChatInviteRequest(text.split('+')[-1]))
-                await status.edit(TEXTS[lang]['join_success'])
-            except UserAlreadyParticipantError:
-                await status.edit(TEXTS[lang]['join_success'])
-            except:
-                await status.edit(TEXTS[lang]['join_fail'])
+        chat, msg_id = await resolve_link_details(userbot, link)
+        
+        if not chat or not msg_id:
+            await status.edit(get_text("not_found", lang))
             return
 
-        if "t.me/" in text:
-            parts = text.rstrip('/').split('/')
-            msg_id = int(parts[-1])
-            if 't.me/c/' in text: entity = await userbot.get_entity(int('-100' + parts[-2]))
-            else: entity = await userbot.get_entity(parts[-2])
-            
-            msg = await userbot.get_messages(entity, ids=msg_id)
-            if msg.media:
-                await status.edit(TEXTS[lang]['downloading'])
-                path = await userbot.download_media(msg)
-                await status.edit(TEXTS[lang]['uploading'])
-                await bot.send_file(event.chat_id, path, caption=msg.text or "")
-                os.remove(path)
-                
-                if uid not in ADMINS and not vip: use_right(uid)
-                await status.delete()
-            else: await status.edit("No media.")
-            
-    except Exception as e:
-        err_msg = TEXTS[lang].get('error_access', TEXTS['en']['error_access'])
-        await status.edit(err_msg)
+        # Mesajı Çek
+        msg = await userbot.get_messages(chat.id, msg_id)
+        
+        if not msg or msg.empty:
+            await status.edit(get_text("not_found", lang))
+            return
 
+        # İndir
+        await status.edit(get_text("media_dl", lang))
+        file_path = await userbot.download_media(msg)
+        
+        if file_path:
+            await status.edit(get_text("media_ul", lang))
+            # Gönder
+            await bot.send_document(
+                chat_id=user_id,
+                document=file_path,
+                caption=msg.caption or ""
+            )
+            os.remove(file_path)
+            await status.delete()
+        else:
+            # Sadece metinse
+            if msg.text:
+                await bot.send_message(user_id, msg.text)
+                await status.delete()
+            else:
+                await status.edit("❌ Medya Yok.")
+
+    except Exception as e:
+        await status.edit(get_text("error", lang).format(e))
+
+# --- TRANSFER (VIP ONLY) ---
+@bot.on_message(filters.command("transfer") & filters.private)
+async def transfer_cmd(client, message):
+    global STOP_PROCESS
+    user_id = message.from_user.id
+    lang = get_user_lang()
+    
+    # Transfer 2 hak yer (Sadece VIP geçebilir, use_right fonksiyonunda kontrol var)
+    if not use_right(user_id, cost=2):
+        await message.reply(get_text("free_limit", lang)); return
+        
+    try:
+        args = message.command
+        src_link, dst_link, limit = args[1], args[2], int(args[3])
+    except: await message.reply(get_text("syntax_trans", lang)); return
+
+    status = await message.reply(get_text("analyzing", lang))
+    STOP_PROCESS = False
+    
+    src_chat, _ = await resolve_link_details(userbot, src_link)
+    dst_chat, _ = await resolve_link_details(userbot, dst_link)
+    
+    if not src_chat or not dst_chat:
+        await status.edit(get_text("not_found", lang)); return
+        
+    await status.edit(get_text("started", lang).format(src_chat.title, dst_chat.title, limit))
+    
+    count = 0
+    try:
+        async for msg in userbot.get_chat_history(src_chat.id, limit=limit):
+            if STOP_PROCESS: break
+            try:
+                if msg.media: await msg.copy(dst_chat.id, caption=msg.caption)
+                elif msg.text: await userbot.send_message(dst_chat.id, msg.text)
+                count += 1
+                await asyncio.sleep(2)
+            except: pass
+            
+        await status.edit(get_text("done", lang))
+    except Exception as e:
+        await status.edit(get_text("error", lang).format(e))
+
+# --- ADMIN PANEL ---
+@bot.on_message(filters.command("addvip") & filters.private)
+async def addvip(client, message):
+    if message.from_user.id in ADMINS:
+        try:
+            set_vip(int(message.command[1]), True)
+            await message.reply("✅ VIP Yapıldı")
+        except: pass
+
+@bot.on_message(filters.command("delvip") & filters.private)
+async def delvip(client, message):
+    if message.from_user.id in ADMINS:
+        try:
+            set_vip(int(message.command[1]), False)
+            await message.reply("❌ FREE Yapıldı")
+        except: pass
+
+@bot.on_message(filters.command("stop") & filters.private)
+async def stop(client, message):
+    global STOP_PROCESS
+    if message.from_user.id in ADMINS: STOP_PROCESS=True; await message.reply("STOP")
+
+# --- BAŞLATMA ---
 def main():
-    init_db()
-    threading.Thread(target=run_web).start()
-    print("🚀 System Active!")
+    print("🚀 V26.0 Started...")
+    keep_alive()
     userbot.start()
-    bot.run_until_disconnected()
+    bot.start()
+    idle()
+    userbot.stop()
+    bot.stop()
 
 if __name__ == '__main__':
     main()
-
-
