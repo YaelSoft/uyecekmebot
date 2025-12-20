@@ -5,28 +5,28 @@ import logging
 import re
 from threading import Thread
 from flask import Flask
-from pyrogram import Client, filters, idle, enums
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram import Client, filters, enums
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from pyrogram.errors import (
     FloodWait, UserPrivacyRestricted, UserAlreadyParticipant,
-    InviteHashExpired, UsernameInvalid, ChannelPrivate, PeerFlood
+    InviteHashExpired, UsernameInvalid, ChannelPrivate, PeerFlood,
+    SessionPasswordNeeded, BadRequest
 )
 
-# --- 1. AYARLAR ---
+# ==================== 1. AYARLAR ====================
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 ADMINS = list(map(int, os.environ.get("ADMINS", "0").split(",")))
 
-# --- 2. WEB SERVER ---
+# ==================== 2. WEB SERVER ====================
 logging.basicConfig(level=logging.INFO)
-# Pyrogram loglarını sustur (Gereksiz hata basmasın)
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver V38.0 (Memory Mode) Active! 🟢"
+def home(): return "YaelSaver V40.0 (Wizard) Active! 🟢"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -36,31 +36,80 @@ def keep_alive():
     t = Thread(target=run_web)
     t.start()
 
-# --- 3. DİL SİSTEMİ ---
+# ==================== 3. DURUM YÖNETİMİ (STATE) ====================
+# Kullanıcının hangi aşamada olduğunu tutar
+USER_STATE = {} 
+
+# ==================== 4. DİL VE METİNLER ====================
 LANG = {
     "TR": {
-        "welcome": "👋 **YaelSaver V38.0 Hazır!**\n\n🇹🇷 **Dil:** Türkçe\n\n👇 **Menü:**",
-        "rights_out": "❌ **Hakkınız Bitti!**",
-        "vip_only": "🔒 **Sadece VIP!**",
-        "analyzing": "🔍 **İşleniyor...**",
+        "welcome": (
+            "👋 **YaelSaver Premium'a Hoşgeldiniz!**\n\n"
+            "👤 **Durum:** {tier}\n"
+            "🎫 **Kalan Hak:** {rights}\n\n"
+            "🛡️ **Gelişmiş İndirme Sihirbazı:**\n"
+            "Sizi adım adım yönlendirerek gizli gruplardan içerik çekerim.\n\n"
+            "👨‍💻 **Developer:** @yasin33"
+        ),
+        "step_1": (
+            "1️⃣ **ADIM 1: Erişim Kontrolü**\n\n"
+            "Önce içeriğin bulunduğu grubun **Davet Linkini** (t.me/+..) gönder.\n\n"
+            "💡 *Eğer Userbot zaten o gruptaysa veya grup herkese açıksa `/gec` yazabilirsin.*"
+        ),
+        "step_2": (
+            "2️⃣ **ADIM 2: İçerik Linki**\n\n"
+            "Şimdi indirmek istediğin mesajın linkini gönder.\n"
+            "🔗 Örn: `https://t.me/c/123456/789`"
+        ),
+        "processing_join": "🕵️ **Gruba Sızılıyor...**",
+        "join_success": "✅ **Başarıyla Girildi!** Devam ediyoruz...",
+        "join_exists": "⚠️ **Zaten Gruptayım.** Devam ediyoruz...",
+        "join_error": "❌ **Hata:** Link geçersiz veya banlanmışım. Yine de `/gec` diyerek şansını deneyebilirsin.",
         "media_dl": "📥 **İndiriliyor...**",
-        "media_ul": "📤 **Gönderiliyor...**",
-        "not_found": "🚫 **ERİŞİM YOK!**\n\nBu içeriğe erişemiyorum.\nLütfen grubun **Davet Linkini** (`https://t.me/+...`) bana gönder, otomatik gireyim.",
-        "join_success": "✅ **Girdim!** Şimdi tekrar dene.",
-        "join_fail": "❌ **Giremedim!**",
-        "join_already": "⚠️ **Zaten Gruptayım.**",
-        "syntax_get": "⚠️ `/getmedia [Link]`",
-        "syntax_trans": "⚠️ `/transfer [K] [H] [L]`",
-        "error": "❌ Hata: {}"
+        "media_ul": "📤 **Size Yükleniyor...**",
+        "done": "✅ **İşlem Tamamlandı!** (1 Hak Düştü)",
+        "rights_out": "❌ **Günlük Limitiniz Doldu!**\nVIP almak için yöneticiye ulaşın: @yasin33",
+        "error_generic": "❌ **Hata:** {}\nLütfen tekrar deneyin.",
+        "not_found": "🚫 **İçerik Bulunamadı!**\nYa grupta değilim ya da mesaj silinmiş.",
+        "vip_only": "🔒 **Sadece VIP Üyeler Transfer Yapabilir!**",
+        "menu_dl": "📥 İndirme Sihirbazı",
+        "menu_acc": "👤 Hesabım",
+        "cancel": "❌ İptal Edildi."
+    },
+    "EN": {
+        "welcome": "👋 **Welcome to YaelSaver Premium!**\n\nPlan: {tier}\nRights: {rights}\n\n👨‍💻 **Dev:** @yasin33",
+        "step_1": "1️⃣ **STEP 1: Access**\nSend the **Invite Link** of the group.\nType `/gec` if already joined.",
+        "step_2": "2️⃣ **STEP 2: Content**\nNow send the message link.\nEx: `https://t.me/c/xxxx/xxxx`",
+        "processing_join": "🕵️ **Joining...**",
+        "join_success": "✅ **Joined!**",
+        "join_exists": "⚠️ **Already In.**",
+        "join_error": "❌ **Join Error.**",
+        "media_dl": "📥 **Downloading...**",
+        "media_ul": "📤 **Uploading...**",
+        "done": "✅ **Done!**",
+        "rights_out": "❌ **No Credits!** Contact: @yasin33",
+        "error_generic": "❌ Error: {}",
+        "not_found": "🚫 **Not Found!**",
+        "vip_only": "🔒 **VIP Only!**",
+        "menu_dl": "📥 Download Wizard",
+        "menu_acc": "👤 Account",
+        "cancel": "❌ Cancelled."
     }
 }
 
-# --- 4. VERİTABANI ---
-DB_NAME = "yaelsaver_v38.db"
+# ==================== 5. VERİTABANI ====================
+DB_NAME = "yaelsaver_v40.db"
+
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, tier TEXT, rights INTEGER)''')
+        conn.cursor().execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, tier TEXT, rights INTEGER)''')
+        conn.cursor().execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''')
+
+def get_text(key, lang="TR", **kwargs):
+    text = LANG.get(lang, LANG["TR"]).get(key, key)
+    return text.format(**kwargs)
+
+def get_lang(user_id): return "TR" # Sabit TR, isteğe göre DB'den çekilir
 
 def check_user(user_id):
     if user_id in ADMINS: return "ADMIN", 999999
@@ -71,154 +120,172 @@ def check_user(user_id):
         conn.cursor().execute("INSERT INTO users VALUES (?, 'FREE', 5)", (user_id,))
     return "FREE", 5
 
-def use_right(user_id, cost=1):
+def deduct_right(user_id):
     tier, rights = check_user(user_id)
-    if tier in ["ADMIN", "VIP"]: return True
-    if cost > 1 and tier == "FREE": return False 
-    if rights >= cost:
+    if tier in ["ADMIN", "VIP"]: return
+    if rights > 0:
         with sqlite3.connect(DB_NAME) as conn:
-            conn.cursor().execute("UPDATE users SET rights = rights - ? WHERE user_id=?", (cost, user_id))
-        return True
-    return False
+            conn.cursor().execute("UPDATE users SET rights = rights - 1 WHERE user_id=?", (user_id,))
 
 def set_vip(user_id, status):
     tier, rights = ("VIP", 99999) if status else ("FREE", 5)
     with sqlite3.connect(DB_NAME) as conn:
         conn.cursor().execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?)", (user_id, tier, rights))
 
-# --- 5. İSTEMCİLER (MEMORY MODE) ---
+# ==================== 6. İSTEMCİLER ====================
 init_db()
-# in_memory=True: Dosya oluşturmaz, RAM'de çalışır. Hata vermez.
+# Bot
 bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
+# Userbot
 userbot = Client("userbot_session", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
 
-# --- 6. ÖZELLİKLER ---
+# ==================== 7. İŞ AKIŞI (WIZARD) ====================
 
-# A) LINK ANALİZ (GÜVENLİ)
-async def resolve_safe(link):
-    clean = link.strip().replace("https://t.me/", "").replace("@", "")
-    chat = None
-    msg_id = None
-    
-    try:
-        parts = clean.split("/")
-        if parts[-1].isdigit(): msg_id = int(parts[-1])
-        
-        if "c/" in clean: # Private
-            chat_id = int("-100" + parts[parts.index("c")+1])
-            # Direkt ID ile almayı dene
-            try: chat = await userbot.get_chat(chat_id)
-            except: pass
-        else: # Public
-            username = parts[0]
-            try: chat = await userbot.get_chat(username)
-            except: pass
-            
-        return chat, msg_id
-    except: return None, None
-
-# B) START KOMUTU
 @bot.on_message(filters.command("start") & filters.private)
-async def start_cmd(client, message):
+async def start(client, message):
+    USER_STATE.pop(message.from_user.id, None) # Reset state
     tier, rights = check_user(message.from_user.id)
+    lang = get_lang(message.from_user.id)
     
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👤 Hesap", callback_data="acc")]
+        [InlineKeyboardButton(get_text("menu_dl", lang), callback_data="start_wizard")],
+        [InlineKeyboardButton(get_text("menu_acc", lang), callback_data="account")]
     ])
-    await message.reply(f"👋 **Hoşgeldin!**\n\nPlan: {tier}\nHak: {rights}", reply_markup=buttons)
+    
+    await message.reply(get_text("welcome", lang, tier=tier, rights=rights), reply_markup=buttons)
 
 @bot.on_callback_query()
-async def cb(client, callback):
-    if callback.data == "acc":
-        tier, rights = check_user(callback.from_user.id)
-        await callback.answer(f"Plan: {tier} | Hak: {rights}", show_alert=True)
+async def callbacks(client, cb):
+    user_id = cb.from_user.id
+    lang = get_lang(user_id)
+    
+    if cb.data == "account":
+        tier, rights = check_user(user_id)
+        await cb.answer(f"Plan: {tier} | Hak: {rights}", show_alert=True)
+        
+    elif cb.data == "start_wizard":
+        # Hak Kontrolü
+        tier, rights = check_user(user_id)
+        if rights <= 0 and tier == "FREE":
+            await cb.answer(get_text("rights_out", lang), show_alert=True)
+            return
+            
+        USER_STATE[user_id] = "WAITING_INVITE"
+        await cb.message.reply(get_text("step_1", lang))
+        await cb.answer()
 
-# C) GETMEDIA (HATA YAKALAYICILI)
-@bot.on_message(filters.command("getmedia") & filters.private)
-async def getmedia(client, message):
+@bot.on_message(filters.private & filters.text)
+async def message_handler(client, message):
     user_id = message.from_user.id
-    if not use_right(user_id, 1): await message.reply(LANG["TR"]["rights_out"]); return
-
-    try: link = message.command[1]
-    except: await message.reply(LANG["TR"]["syntax_get"]); return
+    state = USER_STATE.get(user_id)
+    lang = get_lang(user_id)
+    text = message.text.strip()
     
-    status = await message.reply(LANG["TR"]["analyzing"])
-    
-    # Link Analiz
-    chat, msg_id = await resolve_safe(link)
-    
-    # Eğer chat objesi yoksa ama ID varsa
-    target_chat = None
-    if chat: target_chat = chat.id
-    elif "c/" in link: 
-        try: target_chat = int("-100" + link.split("c/")[1].split("/")[0])
-        except: pass
-    
-    if not target_chat or not msg_id:
-        await status.edit(LANG["TR"]["not_found"])
-        return
-
-    # İndirme (Try-Except ile Korumalı)
-    try:
-        msg = await userbot.get_messages(target_chat, msg_id)
-        
-        if not msg or msg.empty:
-            raise Exception("Empty")
-
-        await status.edit(LANG["TR"]["media_dl"])
-        path = await userbot.download_media(msg)
-        
-        if path:
-            await status.edit(LANG["TR"]["media_ul"])
-            caption = msg.caption or "📥 @yasin33"
-            await bot.send_document(user_id, path, caption=caption)
-            os.remove(path)
-            await status.delete()
-        elif msg.text:
-            await bot.send_message(user_id, msg.text)
-            await status.delete()
+    # 1. ADIM: DAVET LİNKİ İŞLEME
+    if state == "WAITING_INVITE":
+        if text.lower() == "/gec":
+            await message.reply(get_text("step_2", lang))
+            USER_STATE[user_id] = "WAITING_LINK"
+            return
+            
+        # Link mi?
+        if "t.me/" in text:
+            status = await message.reply(get_text("processing_join", lang))
+            try:
+                # Temizle
+                join_link = text.replace("https://t.me/", "").replace("+", "joinchat/")
+                await userbot.join_chat(join_link)
+                await status.edit(get_text("join_success", lang))
+            except UserAlreadyParticipant:
+                await status.edit(get_text("join_exists", lang))
+            except Exception as e:
+                await status.edit(get_text("join_error", lang))
+            
+            # Başarılı olsa da olmasa da 2. adıma geç (belki userbot zaten içindedir)
+            await message.reply(get_text("step_2", lang))
+            USER_STATE[user_id] = "WAITING_LINK"
         else:
-            await status.edit("❌ Medya Yok.")
+            await message.reply("⚠️ Lütfen geçerli bir link atın veya `/gec` yazın.")
 
-    except (KeyError, ValueError, ChannelPrivate):
-        # PeerID hatası burada yakalanır
-        await status.edit(LANG["TR"]["not_found"])
-    except Exception as e:
-        await status.edit(f"Hata: {e}")
-
-# D) JOIN (OTOMATİK YAKALAYICI)
-@bot.on_message(filters.private & filters.regex(r"t\.me/(\+|joinchat)"))
-async def auto_join(client, message):
-    links = re.findall(r"https?://t\.me/(?:\+|joinchat/)([\w-]+)", message.text)
-    if not links: return
-    
-    msg = await message.reply("🕵️ ...")
-    for hash_val in links:
+    # 2. ADIM: İÇERİK LİNKİ VE İNDİRME
+    elif state == "WAITING_LINK":
+        if "t.me/" not in text:
+            await message.reply("⚠️ Geçersiz link.")
+            return
+            
+        status = await message.reply(get_text("media_dl", lang))
+        
+        # Link Analiz
+        chat_id = None
+        msg_id = None
         try:
-            await userbot.join_chat(hash_val)
-            await msg.edit(LANG["TR"]["join_success"])
-        except UserAlreadyParticipant:
-            await msg.edit(LANG["TR"]["join_already"])
-        except Exception:
-            await msg.edit(LANG["TR"]["join_fail"])
+            clean = text.replace("https://t.me/", "").replace("@", "")
+            if "c/" in clean: # Private
+                parts = clean.split("c/")[1].split("/")
+                chat_id = int("-100" + parts[0])
+                msg_id = int(parts[1])
+            else: # Public
+                parts = clean.split("/")
+                chat_id = parts[0]
+                msg_id = int(parts[1])
+        except:
+            await status.edit("❌ Link çözülemedi."); return
 
-# E) ADMIN
+        # İndirme İşlemi
+        try:
+            msg = await userbot.get_messages(chat_id, msg_id)
+            
+            if not msg or msg.empty:
+                await status.edit(get_text("not_found", lang))
+                USER_STATE.pop(user_id, None) # Reset
+                return
+
+            # Varsa kopyala (Hızlı)
+            try:
+                await msg.copy(user_id)
+                await status.delete()
+                deduct_right(user_id)
+                await message.reply(get_text("done", lang))
+                USER_STATE.pop(user_id, None)
+                return
+            except: pass # Copy yasaksa devam et
+
+            # İndir
+            path = await userbot.download_media(msg)
+            if path:
+                await status.edit(get_text("media_ul", lang))
+                caption = msg.caption or "📥 @yasin33"
+                await bot.send_document(user_id, path, caption=caption)
+                os.remove(path)
+                await status.delete()
+                deduct_right(user_id)
+                await message.reply(get_text("done", lang))
+            else:
+                if msg.text:
+                    await bot.send_message(user_id, msg.text)
+                    deduct_right(user_id)
+                else:
+                    await status.edit("❌ Dosya türü desteklenmiyor.")
+            
+            USER_STATE.pop(user_id, None)
+
+        except Exception as e:
+            await status.edit(get_text("error_generic", lang).format(e))
+            USER_STATE.pop(user_id, None)
+
+# --- ADMIN ---
 @bot.on_message(filters.command("addvip") & filters.user(ADMINS))
-async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("VIP OK")
+async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅ VIP Verildi")
 
 @bot.on_message(filters.command("delvip") & filters.user(ADMINS))
-async def delvip(c, m): set_vip(int(m.command[1]), False); await m.reply("FREE OK")
+async def delvip(c, m): set_vip(int(m.command[1]), False); await m.reply("❌ VIP Alındı")
 
-# --- 7. BAŞLATMA ---
+# --- BAŞLATMA ---
 async def start_bot():
-    print("🚀 Bot Başlatılıyor...")
+    print("🚀 Sistem Başlatılıyor...")
     await bot.start()
-    print("✅ Bot Aktif!")
-    
-    print("🚀 Userbot Başlatılıyor...")
-    try: await userbot.start(); print("✅ Userbot Aktif!")
+    try: await userbot.start(); print("✅ Userbot Aktif")
     except Exception as e: print(f"⚠️ Userbot Hatası: {e}")
-    
     await idle()
     await bot.stop()
     try: await userbot.stop()
