@@ -6,10 +6,10 @@ import re
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle, enums
+# HATALI IMPORT SİLİNDİ, SADECE GEREKLİ OLANLAR KALDI:
 from pyrogram.errors import (
     FloodWait, UserPrivacyRestricted, UserAlreadyParticipant,
-    InviteHashExpired, UsernameInvalid, ChannelPrivate, PeerFlood,
-    message_not_modified
+    InviteHashExpired, UsernameInvalid, ChannelPrivate, PeerFlood
 )
 
 # --- 1. AYARLAR ---
@@ -23,7 +23,7 @@ ADMINS = list(map(int, os.environ.get("ADMINS", "0").split(",")))
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 @app.route('/')
-def home(): return "YaelSaver V28.0 (Joiner Edition) Active! 🟢"
+def home(): return "YaelSaver V29.0 Active! 🟢"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -36,13 +36,13 @@ def keep_alive():
 # --- 3. DİL VE METİNLER ---
 LANG = {
     "TR": {
-        "welcome": "👋 **YaelSaver V28.0 Hazır!**\n\n🇹🇷 **Dil:** Türkçe\n\n👇 **Komutlar:**\n🔹 `/getmedia [MesajLink]` -> İçerik İndir\n🔹 `/join [DavetLinki]` -> Userbot'u Gruba Sok\n🔹 `/transfer [K] [H] [Limit]` -> Transfer\n\n👨‍💻 **Developer:** @yasin33",
-        "analyzing": "🔍 **Userbot Erişimini Kontrol Ediyorum...**",
+        "welcome": "👋 **YaelSaver V29.0 Sistemine Hoşgeldiniz!**\n\n🇹🇷 **Dil:** Türkçe\n\n👇 **Komutlar:**\n🔹 `/getmedia [MesajLink]` -> İçerik İndir\n🔹 `/join [DavetLinki]` -> Userbot'u Gruba Sok\n🔹 `/transfer [K] [H] [Limit]` -> Transfer\n\n👨‍💻 **Developer:** @yasin33",
+        "analyzing": "🔍 **Erişim Kontrol Ediliyor...**",
         "media_dl": "📥 **İndiriliyor...**",
         "media_ul": "📤 **Bot Yüklüyor...**",
         "not_in_chat": "🚫 **ERİŞİM YOK!**\n\nUserbot bu gizli grupta değil.\nLütfen şu komutla Userbot'u içeri alın:\n`/join https://t.me/+DavetLinki`\n\nSonra tekrar deneyin.",
         "join_success": "✅ **Başarılı!** Userbot gruba girdi.\nŞimdi `/getmedia` işlemini tekrar deneyebilirsiniz.",
-        "join_fail": "❌ **Giremedim!** Link geçersiz, süresi dolmuş veya Userbot banlı.",
+        "join_fail": "❌ **Giremedim!** Link geçersiz veya banlı.",
         "join_already": "⚠️ **Zaten Üye:** Userbot bu grupta zaten var.",
         "rights_out": "❌ **Hakkınız Bitti!**",
         "error": "❌ Hata: {}",
@@ -50,13 +50,13 @@ LANG = {
         "syntax_join": "⚠️ Örnek: `/join https://t.me/+AbCdEfGhIjK`"
     },
     "EN": {
-        "welcome": "👋 **YaelSaver V28.0 Ready!**\n\n🇺🇸 **Lang:** English\n\n👇 **Commands:**\n🔹 `/getmedia [Link]`\n🔹 `/join [InviteLink]`\n🔹 `/transfer`\n\n👨‍💻 **Dev:** @yasin33",
-        "analyzing": "🔍 **Checking Access...**",
+        "welcome": "👋 **YaelSaver V29.0 Ready!**\n\n🇺🇸 **Lang:** English\n\n👇 **Commands:**\n🔹 `/getmedia [Link]`\n🔹 `/join [Link]`\n🔹 `/transfer`\n\n👨‍💻 **Dev:** @yasin33",
+        "analyzing": "🔍 **Checking...**",
         "media_dl": "📥 **Downloading...**",
         "media_ul": "📤 **Uploading...**",
-        "not_in_chat": "🚫 **NO ACCESS!**\n\nUserbot is not in this private chat.\nPlease use `/join [InviteLink]` first.",
-        "join_success": "✅ **Joined!** Retry your command now.",
-        "join_fail": "❌ **Failed!** Invalid link or banned.",
+        "not_in_chat": "🚫 **NO ACCESS!**\n\nUserbot not in chat.\nUse `/join [InviteLink]` first.",
+        "join_success": "✅ **Joined!** Retry command.",
+        "join_fail": "❌ **Failed!**",
         "join_already": "⚠️ **Already Member.**",
         "rights_out": "❌ **No Credits!**",
         "error": "❌ Error: {}",
@@ -66,7 +66,7 @@ LANG = {
 }
 
 # --- 4. VERİTABANI ---
-DB_NAME = "yaelsaver_v28.db"
+DB_NAME = "yaelsaver_v29.db"
 
 def init_db():
     with sqlite3.connect(DB_NAME) as conn:
@@ -114,9 +114,8 @@ init_db()
 bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 userbot = Client("userbot_session", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING)
 
-# --- 6. YARDIMCI FONKSİYONLAR ---
+# --- 6. ID ÇÖZÜCÜ ---
 def get_private_chat_id(link):
-    """t.me/c/12345/678 linkinden Chat ID (-10012345) ve Msg ID (678) çıkarır."""
     try:
         if "c/" in link:
             parts = link.split("c/")[1].split("/")
@@ -147,29 +146,27 @@ async def addvip(client, message):
 async def delvip(client, message):
     if message.from_user.id in ADMINS: set_vip(int(message.command[1]), False); await message.reply("FREE OK")
 
-# --- /join (MANUEL GİRİŞ) ---
+# --- /join ---
 @bot.on_message(filters.command("join") & filters.private)
 async def join_cmd(client, message):
     user_id = message.from_user.id
-    if not use_right(user_id, 0): return # Hak yemez ama VIP kontrolü yapılabilir
+    if not use_right(user_id, 0): return
     
-    try:
-        link = message.command[1]
+    try: link = message.command[1]
     except: await message.reply(get_text("syntax_join")); return
     
-    msg = await message.reply("🕵️ **Giriş deneniyor...**")
+    msg = await message.reply("🕵️ ...")
     
     try:
-        # Link temizle
         clean = link.replace("https://t.me/", "").replace("+", "joinchat/")
         await userbot.join_chat(clean)
         await msg.edit(get_text("join_success"))
     except UserAlreadyParticipant:
         await msg.edit(get_text("join_already"))
     except Exception as e:
-        await msg.edit(get_text("join_fail") + f"\n\n`{e}`")
+        await msg.edit(get_text("join_fail") + f"\n`{e}`")
 
-# --- /getmedia (AKILLI KONTROL) ---
+# --- /getmedia ---
 @bot.on_message(filters.command("getmedia") & filters.private)
 async def getmedia(client, message):
     user_id = message.from_user.id
@@ -180,13 +177,12 @@ async def getmedia(client, message):
     
     status = await message.reply(get_text("analyzing"))
     
-    # 1. ID Çözümleme
     chat_id = None
     msg_id = None
     
-    if "/c/" in link: # Private Link
+    if "/c/" in link:
         chat_id, msg_id = get_private_chat_id(link)
-    else: # Public Link
+    else:
         try:
             temp = link.replace("https://t.me/", "").split("/")
             username = temp[0]
@@ -196,38 +192,25 @@ async def getmedia(client, message):
         except: pass
 
     if not chat_id or not msg_id:
-        await status.edit("❌ **Link Formatı Hatası!**\nLütfen `https://t.me/c/...` veya `https://t.me/kullanici/...` formatında atın.")
+        await status.edit("❌ **Link Hatası:** `https://t.me/c/...` formatı kullanın.")
         return
 
-    # 2. Mesajı Çekme Denemesi
     try:
         msg = await userbot.get_messages(chat_id, msg_id)
-        
-        # Eğer mesaj boş geldiyse (None veya empty)
-        if not msg or msg.empty:
-            raise ChannelPrivate # Zorla hataya düşür
+        if not msg or msg.empty: raise ChannelPrivate
             
-    except (ChannelPrivate, PeerFlood, Exception) as e:
-        # İŞTE BURASI: Eğer erişemezse kullanıcıyı uyar
+    except (ChannelPrivate, PeerFlood, Exception):
         await status.edit(get_text("not_in_chat"))
         return
 
-    # 3. İndirme ve Gönderme
     try:
         await status.edit(get_text("media_dl"))
         file = await userbot.download_media(msg)
         
         if file:
             await status.edit(get_text("media_ul"))
-            
-            # Caption
             cap = msg.caption if msg.caption else f"📥 @yasin33"
-            
-            await bot.send_document(
-                chat_id=user_id,
-                document=file,
-                caption=cap
-            )
+            await bot.send_document(chat_id=user_id, document=file, caption=cap)
             os.remove(file)
             await status.delete()
         else:
@@ -235,14 +218,14 @@ async def getmedia(client, message):
                 await bot.send_message(user_id, msg.text)
                 await status.delete()
             else:
-                await status.edit("❌ Dosya bulunamadı.")
+                await status.edit("❌ Dosya yok.")
                 
     except Exception as e:
         await status.edit(f"Hata: {e}")
 
 # --- BAŞLATMA ---
 def main():
-    print("🚀 YaelSaver V28.0 (Joiner) Started...")
+    print("🚀 V29.0 Started...")
     keep_alive()
     userbot.start()
     bot.start()
