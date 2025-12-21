@@ -26,7 +26,7 @@ logging.getLogger("pyrogram").setLevel(logging.WARNING)
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "YaelSaver V54 (PeerID Fix) Active! 🟢"
+def home(): return "YaelSaver V55 (Cache Refresh) Active! 🟢"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -50,16 +50,13 @@ def check_user_access(user_id):
     if user_id == OWNER_ID: return True, "👑 Yönetici (Sınırsız)"
     conn = sqlite3.connect(DB_NAME)
     res = conn.cursor().execute("SELECT status, join_date FROM users WHERE user_id=?", (user_id,)).fetchone()
-    
     if not res: 
         now = datetime.now().isoformat()
         conn.cursor().execute("INSERT INTO users VALUES (?, 'FREE', ?)", (user_id, now))
         conn.commit(); conn.close()
         return True, "🟢 Deneme (24 Saat)"
-    
     status, join_str = res
     conn.close()
-    
     if status == "VIP": return True, "💎 VIP Üye (Sınırsız)"
     if datetime.now() < datetime.fromisoformat(join_str) + timedelta(hours=24): return True, "🟢 Deneme Sürümü"
     return False, "🔴 Süre Doldu"
@@ -86,11 +83,10 @@ def main_menu(user_id):
     btns = [
         [InlineKeyboardButton("📥 İçerik İndir", callback_data="help_dl"),
          InlineKeyboardButton("👤 Hesabım", callback_data="my_account")],
-        [InlineKeyboardButton("👑 VIP Menüsü (Transfer)", callback_data="vip_menu")],
+        [InlineKeyboardButton("👑 VIP Menüsü", callback_data="vip_menu")],
         [InlineKeyboardButton("🛠 Satın Al: @yasin33", url="https://t.me/yasin33")]
     ]
-    if user_id == OWNER_ID:
-        btns.append([InlineKeyboardButton("👮‍♂️ Yönetici Paneli", callback_data="admin_panel")])
+    if user_id == OWNER_ID: btns.append([InlineKeyboardButton("👮‍♂️ Yönetici Paneli", callback_data="admin_panel")])
     return InlineKeyboardMarkup(btns)
 
 def vip_menu():
@@ -102,8 +98,7 @@ def vip_menu():
 
 def admin_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ VIP Ekle", callback_data="how_add"),
-         InlineKeyboardButton("➖ VIP Sil", callback_data="how_del")],
+        [InlineKeyboardButton("➕ VIP Ekle", callback_data="how_add"), InlineKeyboardButton("➖ VIP Sil", callback_data="how_del")],
         [InlineKeyboardButton("📊 İstatistikler", callback_data="stats")],
         [InlineKeyboardButton("🔙 Ana Menü", callback_data="main")]
     ])
@@ -115,32 +110,30 @@ def back_btn(): return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri D�
 async def start(client, message):
     user_id = message.from_user.id
     access, status = check_user_access(user_id)
-    if not access: await message.reply(f"⛔ **Süreniz Doldu!**\nDevam etmek için: @yasin33"); return
-    await message.reply(f"👋 **YaelSaver Paneline Hoşgeldiniz**\nℹ️ Durum: {status}", reply_markup=main_menu(user_id))
+    if not access: await message.reply(f"⛔ **Süreniz Doldu!**"); return
+    await message.reply(f"👋 **YaelSaver V55**\nℹ️ Durum: {status}", reply_markup=main_menu(user_id))
 
 @bot.on_callback_query()
 async def cb_handler(client, cb):
     uid = cb.from_user.id
     data = cb.data
-
     if data == "main": await cb.message.edit_text("👋 **Ana Menü**", reply_markup=main_menu(uid))
-    elif data == "help_dl": await cb.message.edit_text("📥 **İndirme Rehberi:**\n1. Mesaj linkini at (`t.me/c/...`)\n2. Hata verirse Davet Linki at.", reply_markup=back_btn())
-    elif data == "my_account": 
-        _, st = check_user_access(uid)
-        await cb.message.edit_text(f"👤 ID: `{uid}`\n📊 Durum: {st}", reply_markup=back_btn())
+    elif data == "help_dl": await cb.message.edit_text("📥 Link at (`t.me/c/...`). Hata verirse davet linki at.", reply_markup=back_btn())
+    elif data == "my_account": _, st = check_user_access(uid); await cb.message.edit_text(f"📊 {st}", reply_markup=back_btn())
     elif data == "vip_menu": await cb.message.edit_text("👑 **VIP Bölümü**", reply_markup=vip_menu())
-    elif data == "help_trans": await cb.message.edit_text("🔄 `/transfer Kaynak Hedef Adet`\n\n⚠️ Bot iki grupta da olmalı.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="vip_menu")]]))
-    elif data == "vip_info": await cb.message.edit_text("✨ Sınırsız indirme ve transfer hakkı.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="vip_menu")]]))
+    elif data == "help_trans": await cb.message.edit_text("🔄 `/transfer Kaynak Hedef Adet`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="vip_menu")]]))
+    elif data == "vip_info": await cb.message.edit_text("✨ Sınırsız indirme.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="vip_menu")]]))
     elif data == "admin_panel":
         if uid != OWNER_ID: await cb.answer("Yasak!", show_alert=True); return
-        await cb.message.edit_text("👮‍♂️ **Admin Paneli**", reply_markup=admin_menu())
-    elif data == "how_add": await cb.message.edit_text("`/addvip ID`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_panel")]]))
-    elif data == "how_del": await cb.message.edit_text("`/delvip ID`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_panel")]]))
-    elif data == "stats":
-        t, v = get_stats()
-        await cb.message.edit_text(f"👥 Toplam: {t}\n💎 VIP: {v}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_panel")]]))
+        await cb.message.edit_text("👮‍♂️ Admin", reply_markup=admin_menu())
+    elif data == "stats": t, v = get_stats(); await cb.message.edit_text(f"👥 T: {t} | 💎 V: {v}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_panel")]]))
 
-# ==================== 7. AKILLI İNDİRİCİ (PEER ID FIX) ====================
+# ==================== 7. ZEKİ İNDİRİCİ (CACHE REFRESH ÖZELLİĞİ) ====================
+async def refresh_dialogs():
+    # Userbot'un tüm kanallarını bir kere çeker, böylece hafıza tazelenir
+    async for dialog in userbot.get_dialogs(limit=50):
+        pass
+
 @bot.on_message(filters.regex(r"t\.me/") & filters.private)
 async def link_handler(client, message):
     user_id = message.from_user.id
@@ -149,20 +142,20 @@ async def link_handler(client, message):
 
     text = message.text.strip()
     
-    # A) DAVET LİNKİ (Join)
+    # A) DAVET LİNKİ
     if "+" in text or "joinchat" in text:
-        status_msg = await message.reply("🕵️ **Gruba Sızılıyor...**")
+        status_msg = await message.reply("🕵️ **Sızılıyor...**")
         try:
             await userbot.join_chat(text)
-            await status_msg.edit("✅ **Sızma Başarılı!**\nUserbot gruba girdi ve kanalı hafızaya aldı.\nŞimdi içerik linkini tekrar at.")
+            await status_msg.edit("✅ **Girdim!**\nŞimdi içerik linkini tekrar at.")
         except UserAlreadyParticipant:
-            await status_msg.edit("⚠️ **Zaten İçerideyim.**\nLütfen direkt mesaj linkini at.")
+            await status_msg.edit("⚠️ **Zaten içerideyim.**\nİçerik linkini gönder.")
         except Exception as e:
-            await status_msg.edit(f"❌ **Giremedim:** {e}")
+            await status_msg.edit(f"❌ **Hata:** {e}")
         return
 
-    # B) MESAJ LİNKİ (Download)
-    status_msg = await message.reply("🔍 **Veri Çekiliyor...**")
+    # B) MESAJ LİNKİ
+    status_msg = await message.reply("🔍 **Aranıyor...**")
     
     try:
         clean = text.replace("https://t.me/", "").replace("@", "")
@@ -175,65 +168,57 @@ async def link_handler(client, message):
             chat_id = parts[0]
             msg_id = int(parts[1])
             
-        # --- KRİTİK NOKTA: PEER ID ÇÖZÜMLEME ---
-        # Önce mesajı çekmeyi dene
+        # --- KRİTİK FIX: HAFIZA TAZELEME DÖNGÜSÜ ---
         try:
+            # 1. Deneme: Direkt çek
             msg = await userbot.get_messages(chat_id, msg_id)
         except (PeerIdInvalid, ChannelInvalid):
-            # Eğer ID hatası verirse, Userbot kanalı tanımıyor demektir.
-            # get_chat ile tanıtmaya çalışalım (Sadece public veya userbotun olduğu kanallarda çalışır)
+            # Hata verirse Hafıza Tazele (Cache Refresh)
+            await status_msg.edit("🔄 **Sunucu Hafızası Tazeleniyor...**")
+            await refresh_dialogs() # Sihirli satır burası
             try:
-                await userbot.get_chat(chat_id)
-                msg = await userbot.get_messages(chat_id, msg_id) # Tekrar dene
+                # 2. Deneme: Tazelenmiş hafızayla çek
+                msg = await userbot.get_messages(chat_id, msg_id)
             except:
-                raise PeerIdInvalid # Yine olmazsa demek ki userbot grupta yok.
+                raise PeerIdInvalid # Yine olmazsa gerçekten yokuzdur.
 
-        if not msg or msg.empty: raise ChannelPrivate("Boş mesaj")
+        if not msg or msg.empty: raise ChannelPrivate("Boş")
 
         await status_msg.edit("📥 **İndiriliyor...**")
-        
         if msg.media:
             path = await userbot.download_media(msg)
             if path:
-                await status_msg.edit("📤 **Yükleniyor...**")
+                await status_msg.edit("📤 **Gönderiliyor...**")
                 await client.send_document(user_id, path, caption=msg.caption or "")
                 os.remove(path); await status_msg.delete()
         else:
             await client.send_message(user_id, msg.text)
             await status_msg.delete()
 
-    except (ChannelPrivate, PeerIdInvalid, ChannelInvalid, KeyError):
-        # Bu hatalar Userbot'un o kanalı görmediğini gösterir
-        await status_msg.edit(
-            "⛔ **ERİŞİM YOK!**\n\n"
-            "Userbot bu kanalı tanımıyor (PeerIDInvalid).\n\n"
-            "👇 **ÇÖZÜM:**\n"
-            "Bu kanalın **Davet Linkini** (`t.me/+...`) bana gönder.\n"
-            "Girdikten sonra bu linki tekrar atarsan çalışacak."
-        )
+    except (ChannelPrivate, PeerIdInvalid, ChannelInvalid):
+        await status_msg.edit("⛔ **ERİŞİM YOK!**\nUserbot bu kanalda değil veya hafızada bulunamadı.\n\n👇 **Çözüm:**\nGrubun **Davet Linkini** at, girip hafızayı yenileyeyim.")
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
 
-# ==================== 8. VIP TRANSFER ====================
+# ==================== 8. TRANSFER ====================
 @bot.on_message(filters.command("transfer") & filters.private)
 async def transfer(client, message):
     user_id = message.from_user.id
     access, status = check_user_access(user_id)
     if "VIP" not in status and user_id != OWNER_ID:
-        await message.reply("🔒 **Sadece VIP!**", reply_markup=vip_menu()); return
+        await message.reply("🔒 **Sadece VIP!**"); return
 
     try:
         args = message.command
         src, dst, limit = int(args[1]), int(args[2]), int(args[3])
-        status_msg = await message.reply(f"🚀 **Başladı:** {limit} adet...")
+        status_msg = await message.reply("🚀 **Başlıyor...**")
         
-        # PeerID hatasını önlemek için önden kontrol
+        # Transferden önce de hafızayı tazele ki PeerID yemesin
         try:
             await userbot.get_chat(src)
-            await userbot.get_chat(dst)
         except:
-            await status_msg.edit("❌ **Hata:** Userbot kaynak veya hedef kanalı tanımıyor. İkisine de üye mi?"); return
-
+            await refresh_dialogs()
+            
         count = 0
         async for msg in userbot.get_chat_history(src, limit=limit):
             try:
@@ -245,9 +230,9 @@ async def transfer(client, message):
             except FloodWait as e: await asyncio.sleep(e.value + 5)
             except: pass
         await status_msg.edit(f"✅ **Bitti!** Toplam: {count}")
-    except: await message.reply("❌ Hata! `/transfer Kaynak Hedef Adet`")
+    except: await message.reply("❌ Hata! `/transfer Kaynak Hedef Limit`")
 
-# ==================== 9. ADMİN KOMUTLARI ====================
+# ==================== 9. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
 @bot.on_message(filters.command("delvip") & filters.user(OWNER_ID))
