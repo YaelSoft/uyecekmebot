@@ -21,7 +21,8 @@ OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 
 # ÇİFT MOTOR SESSIONLAR
 SESSION1 = os.environ.get("SESSION_STRING", "")
-SESSION2 = os.environ.get("SESSION_STRING_2", "") 
+SESSION2 = os.environ.get("SESSION_STRING_2", "")
+SESSION3 = os.environ.get("SESSION_STRING_3", "")
 
 # ==================== 2. WEB SERVER ====================
 logging.basicConfig(level=logging.INFO)
@@ -76,6 +77,7 @@ bot = Client("saver_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN,
 USERBOTS = []
 if SESSION1: USERBOTS.append(Client("ub1", api_id=API_ID, api_hash=API_HASH, session_string=SESSION1, in_memory=True))
 if SESSION2: USERBOTS.append(Client("ub2", api_id=API_ID, api_hash=API_HASH, session_string=SESSION2, in_memory=True))
+if SESSION3: USERBOTS.append(Client("ub3", api_id=API_ID, api_hash=API_HASH, session_string=SESSION3, in_memory=True))
 
 # ==================== 5. YENİ MENÜLER (PROFESYONEL) ====================
 def main_menu(user_id):
@@ -269,38 +271,153 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
+# ==================== 8. ULTRA TRANSFER (RESTRICTED + ROTASYONLU) ====================
+import time
 
-# ==================== 8. TRANSFER ====================
+# İlerleme durumunu kaydetmek için
+def save_progress(chat_id, last_id):
+    with open(f"log_{chat_id}.txt", "w") as f:
+        f.write(str(last_id))
+
+def load_progress(chat_id):
+    if os.path.exists(f"log_{chat_id}.txt"):
+        with open(f"log_{chat_id}.txt", "r") as f:
+            return int(f.read().strip())
+    return 0
+
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer(client, message):
+async def transfer_restricted(client, message):
     user_id = message.from_user.id
     access, status = check_user_access(user_id)
+    
+    # Sadece VIP ve Admin
     if "VIP" not in status and user_id != OWNER_ID:
-        await message.reply("🔒 **Sadece VIP!**"); return
+        await message.reply("🔒 **Bu özellik VVIP müşterilere özeldir.**\nDevasa arşivleri sıfır hatayla taşır."); return
 
-    if not USERBOTS: await message.reply("❌ Userbot yok!"); return
+    if not USERBOTS: await message.reply("❌ Sistemde Userbot yok!"); return
 
     try:
         args = message.command
-        src, dst, limit = int(args[1]), int(args[2]), int(args[3])
-        status_msg = await message.reply("🚀 **Hazırlanıyor...**")
-        
-        ub = USERBOTS[0]
-        try: await ub.get_chat(src)
-        except: await force_scan_all_bots(src)
+        # Komut: /transfer KAYNAK_ID HEDEF_ID LIMIT
+        src_id = int(args[1])
+        dst_id = int(args[2])
+        limit_count = int(args[3])
+    except:
+        await message.reply("⚠️ **Kullanım:** `/transfer -100KaynakID -100HedefID 500`\n(Limit yerine 0 yazarsan hepsini dener)")
+        return
 
-        count = 0
-        async for msg in ub.get_chat_history(src, limit=limit):
+    status_msg = await message.reply(f"🚀 **Transfer Başlatılıyor...**\n\n🎯 Kaynak: `{src_id}`\n🎯 Hedef: `{dst_id}`\n🤖 Bot Sayısı: {len(USERBOTS)}\n\n⏳ **Analiz yapılıyor, lütfen bekle...**")
+
+    # 1. Userbot ile kanala erişim kontrolü
+    active_bot_index = 0
+    main_ub = USERBOTS[0]
+    
+    try: await main_ub.get_chat(src_id)
+    except: 
+        await status_msg.edit("⚠️ Userbot kanalı göremiyor! Link ile katılması lazım.")
+        return
+
+    # 2. Mesajları Çek ve Sırala (Eskiden Yeniye)
+    all_messages = []
+    # Son kalınan yeri yükle
+    last_processed_id = load_progress(src_id)
+    
+    await status_msg.edit("📦 **Mesajlar taranıyor... (Bu işlem medya sayısına göre sürer)**")
+    
+    # 0 limitse çoklu çeker, değilse limit kadar
+    limit_val = limit_count if limit_count > 0 else 5000 
+    
+    async for msg in main_ub.get_chat_history(src_id, limit=limit_val):
+        all_messages.append(msg)
+    
+    # LİSTEYİ TERS ÇEVİR (ESKİDEN YENİYE OLMASI İÇİN)
+    all_messages.reverse()
+    
+    total_count = len(all_messages)
+    processed = 0
+    
+    await status_msg.edit(f"✅ **Analiz Bitti!**\nToplam: {total_count} Mesaj\nKaldığım ID: {last_processed_id}\n\n🚀 **Transfer Başlıyor...**")
+
+    for msg in all_messages:
+        # Eğer bu mesajı daha önce işlediysek atla
+        if msg.id <= last_processed_id:
+            continue
+
+        # Boş mesajları veya servis mesajlarını atla
+        if msg.service or msg.empty:
+            continue
+
+        # ROTASYON DÖNGÜSÜ (Hata alırsak diğer bota geçmek için)
+        sent = False
+        retry_count = 0
+        
+        while not sent and retry_count < 3:
+            current_ub = USERBOTS[active_bot_index]
+            
             try:
-                if msg.media: await msg.copy(dst, caption=msg.caption)
-                elif msg.text: await ub.send_message(dst, msg.text)
-                count += 1
-                await asyncio.sleep(2)
-                if count % 10 == 0: await status_msg.edit(f"🚀 Taşınan: {count}...")
-            except FloodWait as e: await asyncio.sleep(e.value + 5)
-            except: pass
-        await status_msg.edit(f"✅ **Bitti!** Toplam: {count}")
-    except: await message.reply("❌ Hata! `/transfer Kaynak Hedef Limit`")
+                # EĞER MEDYA VARSA (İNDİR -> YÜKLE -> SİL)
+                if msg.media:
+                    caption = msg.caption or ""
+                    
+                    # Dosyayı İndir
+                    file_path = await current_ub.download_media(msg)
+                    
+                    if file_path:
+                        # Dosyayı Yükle (Caption ile)
+                        if msg.photo:
+                            await current_ub.send_photo(dst_id, file_path, caption=caption)
+                        elif msg.video:
+                            await current_ub.send_video(dst_id, file_path, caption=caption)
+                        elif msg.document:
+                            await current_ub.send_document(dst_id, file_path, caption=caption)
+                        elif msg.audio:
+                            await current_ub.send_audio(dst_id, file_path, caption=caption)
+                        elif msg.voice:
+                            await current_ub.send_voice(dst_id, file_path)
+                        
+                        # Render diskini doldurmamak için SİL
+                        os.remove(file_path)
+                        sent = True
+                
+                # SADECE YAZIYSA
+                elif msg.text:
+                    await current_ub.send_message(dst_id, msg.text)
+                    sent = True
+                
+                # Başarılı olursa bekleme süresi (Spam yememek için)
+                time.sleep(3) 
+
+            except FloodWait as e:
+                wait_time = e.value
+                print(f"⚠️ Bot {active_bot_index+1} FloodWait yedi: {wait_time} saniye.")
+                
+                # DİĞER BOTA GEÇ
+                active_bot_index = (active_bot_index + 1) % len(USERBOTS)
+                print(f"🔄 Bot Değiştirildi -> Bot {active_bot_index+1} Devrede!")
+                
+                # Eğer yeni geçen bot da cezalıysa azıcık uyu
+                time.sleep(2)
+                retry_count += 1
+            
+            except Exception as e:
+                print(f"Hata: {e}")
+                retry_count += 1
+                time.sleep(1)
+
+        if sent:
+            processed += 1
+            save_progress(src_id, msg.id) # İlerlemeyi kaydet
+            
+            # Her 10 mesajda bir bilgi ver
+            if processed % 10 == 0:
+                try:
+                    await status_msg.edit(f"🚀 **Transfer Devam Ediyor...**\n\n✅ İşlenen: {processed} / {total_count}\n🤖 Aktif Bot: {active_bot_index+1}")
+                except: pass
+
+    await status_msg.edit(f"🏁 **TRANSFER TAMAMLANDI!**\n\nToplam {processed} içerik başarıyla kopyalandı.")
+    # İş bitince log dosyasını silebilirsin istersen
+    if os.path.exists(f"log_{src_id}.txt"): os.remove(f"log_{src_id}.txt")
+
 
 # ==================== 9. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
@@ -394,4 +511,5 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
