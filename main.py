@@ -271,10 +271,10 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== 8. ULTRA TRANSFER (RESTRICTED + ROTASYONLU) ====================
+# ==================== 8. TRANSFER (PRO DASHBOARD + LINK ÇÖZÜCÜ) ====================
 import time
+import math
 
-# İlerleme durumunu kaydetmek için
 def save_progress(chat_id, last_id):
     with open(f"log_{chat_id}.txt", "w") as f:
         f.write(str(last_id))
@@ -285,139 +285,170 @@ def load_progress(chat_id):
             return int(f.read().strip())
     return 0
 
+# --- İLERLEME ÇUBUĞU OLUŞTURUCU ---
+def get_progress_bar(current, total):
+    percentage = current / total
+    finished_length = int(percentage * 10)
+    # Dolu kutu: ▓, Boş kutu: ░
+    bar = "▓" * finished_length + "░" * (10 - finished_length)
+    return f"[{bar}] %{int(percentage * 100)}"
+
+# --- AKILLI LİNK ÇÖZÜCÜ ---
+async def get_target_id(ub, input_str):
+    input_str = str(input_str).strip()
+    if input_str.startswith("-100"): return int(input_str)
+    if "c/" in input_str:
+        clean = input_str.split("c/")[1].split("/")[0]
+        return int("-100" + clean)
+    if "+" in input_str or "joinchat" in input_str:
+        try:
+            chat = await ub.join_chat(input_str)
+            return chat.id
+        except UserAlreadyParticipant:
+            chat = await ub.get_chat(input_str)
+            return chat.id
+    if "t.me/" in input_str:
+        username = input_str.split("t.me/")[-1].replace("/", "")
+        chat = await ub.get_chat(username)
+        return chat.id
+    return int(input_str)
+
 @bot.on_message(filters.command("transfer") & filters.private)
 async def transfer_restricted(client, message):
     user_id = message.from_user.id
     access, status = check_user_access(user_id)
     
-    # Sadece VIP ve Admin
     if "VIP" not in status and user_id != OWNER_ID:
-        await message.reply("🔒 **Bu özellik VVIP müşterilere özeldir.**\nDevasa arşivleri sıfır hatayla taşır."); return
+        await message.reply("🔒 Sadece VIP!"); return
 
     if not USERBOTS: await message.reply("❌ Sistemde Userbot yok!"); return
 
     try:
         args = message.command
-        # Komut: /transfer KAYNAK_ID HEDEF_ID LIMIT
-        src_id = int(args[1])
-        dst_id = int(args[2])
+        src_input = args[1]
+        dst_input = args[2]
         limit_count = int(args[3])
     except:
-        await message.reply("⚠️ **Kullanım:** `/transfer -100KaynakID -100HedefID 500`\n(Limit yerine 0 yazarsan hepsini dener)")
+        await message.reply("⚠️ **Hata:** `/transfer KAYNAK HEDEF ADET`")
         return
 
-    status_msg = await message.reply(f"🚀 **Transfer Başlatılıyor...**\n\n🎯 Kaynak: `{src_id}`\n🎯 Hedef: `{dst_id}`\n🤖 Bot Sayısı: {len(USERBOTS)}\n\n⏳ **Analiz yapılıyor, lütfen bekle...**")
-
-    # 1. Userbot ile kanala erişim kontrolü
-    active_bot_index = 0
+    status_msg = await message.reply(f"🖥️ **Panel Hazırlanıyor...**")
     main_ub = USERBOTS[0]
-    
-    try: await main_ub.get_chat(src_id)
-    except: 
-        await status_msg.edit("⚠️ Userbot kanalı göremiyor! Link ile katılması lazım.")
+
+    try:
+        src_id = await get_target_id(main_ub, src_input)
+        dst_id = await get_target_id(main_ub, dst_input)
+        await status_msg.edit(f"✅ **Hedef Doğrulandı!**\n\n📦 İçerikler analiz ediliyor, lütfen bekle...")
+    except Exception as e:
+        await status_msg.edit(f"❌ **Erişim Hatası:** {e}")
         return
 
-    # 2. Mesajları Çek ve Sırala (Eskiden Yeniye)
+    # İÇERİK ÇEKME
     all_messages = []
-    # Son kalınan yeri yükle
     last_processed_id = load_progress(src_id)
-    
-    await status_msg.edit("📦 **Mesajlar taranıyor... (Bu işlem medya sayısına göre sürer)**")
-    
-    # 0 limitse çoklu çeker, değilse limit kadar
     limit_val = limit_count if limit_count > 0 else 5000 
     
-    async for msg in main_ub.get_chat_history(src_id, limit=limit_val):
-        all_messages.append(msg)
+    try:
+        async for msg in main_ub.get_chat_history(src_id, limit=limit_val):
+            all_messages.append(msg)
+    except Exception as e:
+        await status_msg.edit(f"❌ Mesajlar alınamadı: {e}")
+        return
     
-    # LİSTEYİ TERS ÇEVİR (ESKİDEN YENİYE OLMASI İÇİN)
-    all_messages.reverse()
+    all_messages.reverse() # Eskiden Yeniye
     
-    total_count = len(all_messages)
-    processed = 0
+    # Sadece işlenmemiş mesajları filtrele (Toplam sayıyı doğru göstermek için)
+    pending_messages = [m for m in all_messages if m.id > last_processed_id and not m.service and not m.empty]
     
-    await status_msg.edit(f"✅ **Analiz Bitti!**\nToplam: {total_count} Mesaj\nKaldığım ID: {last_processed_id}\n\n🚀 **Transfer Başlıyor...**")
+    total_todo = len(pending_messages)
+    if total_todo == 0:
+        await status_msg.edit("✅ **Her şey güncel!**\nAktarılacak yeni mesaj yok.")
+        return
 
-    for msg in all_messages:
-        # Eğer bu mesajı daha önce işlediysek atla
-        if msg.id <= last_processed_id:
-            continue
+    processed_now = 0
+    active_bot_index = 0
+    
+    # İLK BİLGİ PANELİ
+    dashboard_text = (
+        f"🚀 **TRANSFER BAŞLADI**\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 **Toplam:** {total_todo} Adet\n"
+        f"🤖 **Motor:** Başlatılıyor...\n"
+        f"━━━━━━━━━━━━━━━━━━"
+    )
+    await status_msg.edit(dashboard_text)
 
-        # Boş mesajları veya servis mesajlarını atla
-        if msg.service or msg.empty:
-            continue
-
-        # ROTASYON DÖNGÜSÜ (Hata alırsak diğer bota geçmek için)
+    # DÖNGÜ BAŞLIYOR
+    for msg in pending_messages:
         sent = False
         retry_count = 0
         
         while not sent and retry_count < 3:
             current_ub = USERBOTS[active_bot_index]
-            
             try:
-                # EĞER MEDYA VARSA (İNDİR -> YÜKLE -> SİL)
                 if msg.media:
                     caption = msg.caption or ""
-                    
-                    # Dosyayı İndir
                     file_path = await current_ub.download_media(msg)
-                    
                     if file_path:
-                        # Dosyayı Yükle (Caption ile)
-                        if msg.photo:
-                            await current_ub.send_photo(dst_id, file_path, caption=caption)
-                        elif msg.video:
-                            await current_ub.send_video(dst_id, file_path, caption=caption)
-                        elif msg.document:
-                            await current_ub.send_document(dst_id, file_path, caption=caption)
-                        elif msg.audio:
-                            await current_ub.send_audio(dst_id, file_path, caption=caption)
-                        elif msg.voice:
-                            await current_ub.send_voice(dst_id, file_path)
-                        
-                        # Render diskini doldurmamak için SİL
+                        if msg.photo: await current_ub.send_photo(dst_id, file_path, caption=caption)
+                        elif msg.video: await current_ub.send_video(dst_id, file_path, caption=caption)
+                        elif msg.document: await current_ub.send_document(dst_id, file_path, caption=caption)
+                        elif msg.audio: await current_ub.send_audio(dst_id, file_path, caption=caption)
+                        elif msg.voice: await current_ub.send_voice(dst_id, file_path)
                         os.remove(file_path)
                         sent = True
-                
-                # SADECE YAZIYSA
                 elif msg.text:
                     await current_ub.send_message(dst_id, msg.text)
                     sent = True
                 
-                # Başarılı olursa bekleme süresi (Spam yememek için)
+                # Başarılı olunca az bekle
                 time.sleep(3) 
 
             except FloodWait as e:
-                wait_time = e.value
-                print(f"⚠️ Bot {active_bot_index+1} FloodWait yedi: {wait_time} saniye.")
-                
-                # DİĞER BOTA GEÇ
+                print(f"⚠️ FloodWait: {e.value}sn. Bot Değişiyor...")
                 active_bot_index = (active_bot_index + 1) % len(USERBOTS)
-                print(f"🔄 Bot Değiştirildi -> Bot {active_bot_index+1} Devrede!")
-                
-                # Eğer yeni geçen bot da cezalıysa azıcık uyu
                 time.sleep(2)
                 retry_count += 1
-            
             except Exception as e:
                 print(f"Hata: {e}")
                 retry_count += 1
                 time.sleep(1)
 
         if sent:
-            processed += 1
-            save_progress(src_id, msg.id) # İlerlemeyi kaydet
+            processed_now += 1
+            save_progress(src_id, msg.id)
             
-            # Her 10 mesajda bir bilgi ver
-            if processed % 10 == 0:
+            # --- PANEL GÜNCELLEME (HER 5 MESAJDA BİR) ---
+            if processed_now % 5 == 0:
                 try:
-                    await status_msg.edit(f"🚀 **Transfer Devam Ediyor...**\n\n✅ İşlenen: {processed} / {total_count}\n🤖 Aktif Bot: {active_bot_index+1}")
+                    bar = get_progress_bar(processed_now, total_todo)
+                    remaining = total_todo - processed_now
+                    
+                    panel = (
+                        f"🔄 **CANLI TRANSFER DURUMU**\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"📊 {bar}\n\n"
+                        f"✅ **Atılan:** {processed_now}\n"
+                        f"⏳ **Kalan:** {remaining}\n"
+                        f"📂 **Toplam:** {total_todo}\n\n"
+                        f"🤖 **Aktif Bot:** {active_bot_index + 1}\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"⚠️ _Lütfen işlemi durdurmayın..._"
+                    )
+                    await status_msg.edit(panel)
                 except: pass
 
-    await status_msg.edit(f"🏁 **TRANSFER TAMAMLANDI!**\n\nToplam {processed} içerik başarıyla kopyalandı.")
-    # İş bitince log dosyasını silebilirsin istersen
+    # BİTİŞ PANELİ
+    final_panel = (
+        f"🏁 **TRANSFER TAMAMLANDI!**\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"✅ **Başarıyla Atılan:** {processed_now}\n"
+        f"📅 **Tarih:** {time.strftime('%d.%m.%Y %H:%M')}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💎 _Bizi tercih ettiğiniz için teşekkürler!_"
+    )
+    await status_msg.edit(final_panel)
     if os.path.exists(f"log_{src_id}.txt"): os.remove(f"log_{src_id}.txt")
-
 
 # ==================== 9. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
@@ -511,5 +542,6 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
