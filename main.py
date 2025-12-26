@@ -307,7 +307,76 @@ async def transfer(client, message):
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
 @bot.on_message(filters.command("delvip") & filters.user(OWNER_ID))
 async def delvip(c, m): set_vip(int(m.command[1]), False); await m.reply("❌")
+# ==================== ID BULUCU (GİZLİ & YASAKLI GRUP FİX) ====================
+@bot.on_message(filters.command("id") & filters.private)
+async def id_finder(client, message):
+    user_id = message.from_user.id
+    
+    # 1. VIP Kontrolü
+    access, status = check_user_access(user_id)
+    if "VIP" not in status and user_id != OWNER_ID:
+        await message.reply("🔒 **Bu özellik sadece VIP müşteriler içindir.**")
+        return
 
+    # 2. Userbot Kontrolü
+    if not USERBOTS:
+        await message.reply("❌ Sistemde aktif Userbot yok!")
+        return
+    ub = USERBOTS[0] # İlk userbotu kullan
+
+    # 3. Link Kontrolü
+    if len(message.command) < 2:
+        await message.reply(
+            "🆔 **ID Bulucu**\n\n"
+            "Grubun linkini yanına yazman lazım.\n"
+            "İletim yasağı olsa bile ID'yi bulabilirim.\n\n"
+            "📌 **Örnek:**\n"
+            "`/id https://t.me/+AhmetinGrubu...`"
+        )
+        return
+
+    link = message.text.split(None, 1)[1].strip()
+    status_msg = await message.reply("🕵️ **Link taranıyor...**")
+
+    try:
+        chat = None
+        
+        # A) GİZLİ LİNK (+Link veya joinchat)
+        if "+" in link or "joinchat" in link:
+            try:
+                # Önce girmeye çalış
+                chat = await ub.join_chat(link)
+            except UserAlreadyParticipant:
+                # Zaten içerdeysek, içeride olduğumuz yetkisiyle bilgileri çek
+                chat = await ub.get_chat(link)
+        
+        # B) GENEL LİNK (@kullaniciadi)
+        else:
+            chat = await ub.get_chat(link)
+
+        # SONUÇ
+        if chat:
+            chat_id = chat.id
+            title = chat.title
+            # Üye sayısını güvenli çekme
+            members = chat.members_count if chat.members_count else "Gizli"
+            
+            text = (
+                f"✅ **Hedef Bulundu!**\n\n"
+                f"📛 **Grup:** {title}\n"
+                f"🆔 **ID:** `{chat_id}`\n"
+                f"👥 **Üye:** {members}\n\n"
+                f"👇 **Transfer Kodu:**\n"
+                f"`/transfer {chat_id} HEDEF_KANAL_ID 100`"
+            )
+            await status_msg.edit(text)
+
+    except InviteHashExpired:
+        await status_msg.edit("❌ **Linkin süresi dolmuş!** Müşteriden yeni link iste.")
+    except FloodWait as e:
+        await status_msg.edit(f"⏳ **Çok hızlı işlem.** {e.value} saniye bekle.")
+    except Exception as e:
+        await status_msg.edit(f"❌ **Hata:** Gruba erişemedim. Userbot'un banlanmadığından emin ol.\n`{e}`")
 # ==================== 10. BAŞLATMA ====================
 async def main():
     print("Sistem Başlatılıyor...")
@@ -325,3 +394,4 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
