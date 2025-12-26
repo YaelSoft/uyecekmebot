@@ -22,7 +22,6 @@ OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 # ÇİFT MOTOR SESSIONLAR
 SESSION1 = os.environ.get("SESSION_STRING", "")
 SESSION2 = os.environ.get("SESSION_STRING_2", "")
-SESSION3 = os.environ.get("SESSION_STRING_3", "")
 
 # ==================== 2. WEB SERVER ====================
 logging.basicConfig(level=logging.INFO)
@@ -77,7 +76,6 @@ bot = Client("saver_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN,
 USERBOTS = []
 if SESSION1: USERBOTS.append(Client("ub1", api_id=API_ID, api_hash=API_HASH, session_string=SESSION1, in_memory=True))
 if SESSION2: USERBOTS.append(Client("ub2", api_id=API_ID, api_hash=API_HASH, session_string=SESSION2, in_memory=True))
-if SESSION3: USERBOTS.append(Client("ub3", api_id=API_ID, api_hash=API_HASH, session_string=SESSION3, in_memory=True))
 
 # ==================== 5. YENİ MENÜLER (PROFESYONEL) ====================
 def main_menu(user_id):
@@ -271,10 +269,15 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== 8. TRANSFER (AUTO-JOIN ALL & ANTI-PEER ERROR) ====================
+# ==================== 8. TRANSFER (DURDURMA + SINIRSIZ + FIX) ====================
 import time
-import math
+import asyncio
+import os
 
+# Küresel Durdurma Bayrağı
+ABORT_FLAG = False
+
+# --- İLERLEME KAYDETME ---
 def save_progress(chat_id, last_id):
     with open(f"log_{chat_id}.txt", "w") as f:
         f.write(str(last_id))
@@ -285,161 +288,144 @@ def load_progress(chat_id):
             return int(f.read().strip())
     return 0
 
+# --- GÖRSEL BAR ---
 def get_progress_bar(current, total):
-    percentage = current / total if total > 0 else 0
+    if total < 1: return "[░░░░░░░░░░] %0"
+    percentage = current / total
     finished_length = int(percentage * 10)
     bar = "▓" * finished_length + "░" * (10 - finished_length)
     return f"[{bar}] %{int(percentage * 100)}"
 
-# --- YENİ: TÜM BOTLARI GRUBA SOKAN FONKSİYON ---
-async def ensure_all_bots_joined(link):
-    joined_count = 0
+# --- LİNK/ID ÇÖZÜCÜ ---
+async def join_and_resolve(input_str):
     target_id = None
+    input_str = str(input_str).strip()
     
     for ub in USERBOTS:
         try:
-            # Link ile katılmayı dene
-            if "+" in link or "joinchat" in link:
-                try:
-                    chat = await ub.join_chat(link)
-                    target_id = chat.id
-                    joined_count += 1
-                except UserAlreadyParticipant:
-                    # Zaten katılıyorsa ID'yi al
-                    chat = await ub.get_chat(link)
-                    target_id = chat.id
-                    joined_count += 1
-            elif "t.me/" in link: # Genel link
-                username = link.split("t.me/")[-1].replace("/", "")
-                chat = await ub.join_chat(username)
-                target_id = chat.id
-                joined_count += 1
-        except Exception as e:
-            print(f"⚠️ Bir bot katılamadı: {e}")
-            
-    return target_id, joined_count
-
-# --- YENİ: ID TANITMA (CACHE WARM-UP) ---
-# Botun dialoglarını tarayıp ID'yi tanımasını sağlar
-async def force_refresh_dialogs(target_id):
-    found = False
-    for ub in USERBOTS:
-        try:
-            # Hedef ID'yi bulana kadar dialogları gez (Max 200)
-            async for dialog in ub.get_dialogs(limit=200):
-                if dialog.chat.id == target_id:
-                    found = True
-                    break
-            if found: break
+            if "t.me" in input_str:
+                if "+" in input_str or "joinchat" in input_str:
+                    try: chat = await ub.join_chat(input_str)
+                    except UserAlreadyParticipant: chat = await ub.get_chat(input_str)
+                else:
+                    if "c/" in input_str:
+                        clean = input_str.split("c/")[1].split("/")[0]
+                        target_id = int("-100" + clean)
+                        continue 
+                    else:
+                        username = input_str.split("t.me/")[-1].replace("/", "")
+                        chat = await ub.join_chat(username)
+                
+                if chat: target_id = chat.id
+            else:
+                try: target_id = int(input_str)
+                except: pass     
         except: pass
-    return found
+    return target_id
 
+# --- DURDURMA KOMUTU ---
+@bot.on_message(filters.command("iptal") & filters.private)
+async def stop_process(client, message):
+    global ABORT_FLAG
+    ABORT_FLAG = True
+    await message.reply("🛑 **İşlem Durduruluyor...**\nBot mevcut dosyanın bitmesini bekleyip duracak.")
+
+# --- TRANSFER KOMUTU ---
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer_final(client, message):
+async def transfer_final_v5(client, message):
+    global ABORT_FLAG
+    ABORT_FLAG = False # Yeni işlem için bayrağı indir
+    
     user_id = message.from_user.id
     access, status = check_user_access(user_id)
     
     if "VIP" not in status and user_id != OWNER_ID:
         await message.reply("🔒 Sadece VIP!"); return
-    if not USERBOTS: await message.reply("❌ Userbot yok!"); return
+    
+    active_bots = USERBOTS[:2] # Sadece 2 Bot Kullan
+    if not active_bots: await message.reply("❌ Userbot yok!"); return
 
     try:
         args = message.command
-        src_input = args[1] # Kaynak
-        dst_input = args[2] # Hedef
+        src_input = args[1]
+        dst_input = args[2]
         limit_count = int(args[3])
     except:
-        await message.reply("⚠️ **Kullanım:** `/transfer KAYNAK HEDEF ADET`")
+        await message.reply("⚠️ **Kullanım:** `/transfer KAYNAK HEDEF ADET`\n(Hepsini çekmek için Adet yerine 0 yaz)")
         return
 
-    status_msg = await message.reply(f"🛡️ **Sistem Hazırlanıyor...**\nBotlar gruba sokuluyor ve hafıza tazeleniyor.")
+    status_msg = await message.reply(f"🛡️ **Bağlantı Kuruluyor...**\nDurdurmak için: `/iptal`")
 
-    # 1. ADIM: KAYNAK GRUBU ANALİZ ET VE GİR
-    src_id = None
-    
-    # Eğer LİNK ise -> Tüm botları sok
-    if "t.me" in src_input:
-        src_id, count = await ensure_all_bots_joined(src_input)
-        if not src_id:
-            await status_msg.edit("❌ **Hata:** Hiçbir bot bu linke giriş yapamadı. Link bozuk veya botlar banlı.")
-            return
-        await status_msg.edit(f"✅ **Giriş Başarılı!**\n{count}/{len(USERBOTS)} bot gruba girdi.\nID: `{src_id}`")
-    
-    # Eğer ID ise -> Hafızayı kontrol et
-    else:
-        try:
-            src_id = int(src_input)
-            # Botların tanıması için dialogları çek
-            await force_refresh_dialogs(src_id)
-        except ValueError:
-            await status_msg.edit("❌ ID Hatalı! Sayı olduğundan emin ol (-100 ile başlar).")
-            return
+    # 1. ID Çözme
+    src_id = await join_and_resolve(src_input)
+    dst_id = await join_and_resolve(dst_input)
 
-    # 2. ADIM: HEDEF GRUBU ANALİZ ET (Sadece ID çözse yeter)
-    dst_id = None
-    if "t.me" in dst_input:
-        # Hedef için sadece 1. botun girmesi/görmesi yeterli (yazmak için)
-        # Ama ID'yi çözmek lazım
-        try:
-            if "+" in dst_input: chat = await USERBOTS[0].join_chat(dst_input)
-            else: chat = await USERBOTS[0].get_chat(dst_input.split("/")[-1])
-            dst_id = chat.id
-        except:
-             await status_msg.edit("❌ Hedef Gruba erişilemedi. Bot admin mi?")
-             return
-    else:
-        dst_id = int(dst_input)
+    if not src_id or not dst_id:
+        await status_msg.edit(f"❌ **HATA:** Kaynak veya Hedef ID bulunamadı.")
+        return
 
-    # 3. ADIM: İÇERİK ÇEKME VE TRANSFER
-    await status_msg.edit(f"📦 **Mesajlar Toplanıyor...**\nBu işlem biraz sürebilir.")
+    # 2. Mesaj Listesi (SINIRSIZ FIX)
+    await status_msg.edit(f"📦 **Mesaj Listesi Hazırlanıyor...**\nLimit: {'SINIRSIZ' if limit_count == 0 else limit_count}\nLütfen bekle, bu işlem uzun sürebilir.")
     
-    main_ub = USERBOTS[0]
-    all_messages = []
+    msg_ids = []
     last_processed_id = load_progress(src_id)
-    limit_val = limit_count if limit_count > 0 else 5000 
     
     try:
-        # Peer ID Invalid yememek için try-except
-        async for msg in main_ub.get_chat_history(src_id, limit=limit_val):
-            all_messages.append(msg)
-    except Exception as e:
-        await status_msg.edit(f"❌ **KRİTİK HATA (Peer Invalid):**\nBot ID'yi tanıyamadı.\n\n**ÇÖZÜM:**\nLütfen `/transfer` komutunda ID yerine **LİNK** kullanın. Link kullanınca botlar otomatik tanır.\n\nTeknik Hata: `{e}`")
-        return
-    
-    all_messages.reverse()
-    pending_messages = [m for m in all_messages if m.id > last_processed_id and not m.service and not m.empty]
-    total_todo = len(pending_messages)
-    
-    if total_todo == 0:
-        await status_msg.edit("✅ **Güncel!** Aktarılacak yeni mesaj yok.")
-        return
-
-    processed_now = 0
-    active_bot_index = 0
-    
-    # DASHBOARD BAŞLANGIÇ
-    dashboard_text = (
-        f"🚀 **TRANSFER V3 BAŞLADI**\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🎯 **Toplam:** {total_todo} Adet\n"
-        f"🛡️ **Mod:** Multi-Userbot Auto-Join\n"
-        f"━━━━━━━━━━━━━━━━━━"
-    )
-    await status_msg.edit(dashboard_text)
-
-    for msg in pending_messages:
-        sent = False
-        retry_count = 0
+        # Limit 0 ise None yap (Pyrogram hepsini çeker)
+        # Ancak 0 verince bazen takıldığı için çok büyük sayı verelim garanti olsun
+        fetch_limit = limit_count if limit_count > 0 else 100000
         
-        while not sent and retry_count < len(USERBOTS) * 2: # Tüm botları 2 tur dene
-            current_ub = USERBOTS[active_bot_index]
+        async for msg in active_bots[0].get_chat_history(src_id, limit=fetch_limit):
+            msg_ids.append(msg.id)
+            # İptal kontrolü (liste çekerken bile durdurabilesin)
+            if ABORT_FLAG: break
+            
+    except Exception as e:
+        await status_msg.edit(f"❌ **Liste Alınamadı:** {e}")
+        return
+
+    if ABORT_FLAG:
+        await status_msg.edit("🛑 **İşlem İptal Edildi!**"); return
+
+    msg_ids.reverse() # Eskiden yeniye
+    
+    todo_ids = [mid for mid in msg_ids if mid > last_processed_id]
+    total_todo = len(todo_ids)
+
+    if total_todo == 0:
+        await status_msg.edit("✅ **Her şey güncel!** Aktarılacak yeni mesaj yok.")
+        return
+
+    # 3. TRANSFER DÖNGÜSÜ
+    processed_count = 0
+    bot_index = 0
+    
+    await status_msg.edit(f"🚀 **TRANSFER BAŞLADI**\nToplam: {total_todo} Mesaj\n🛑 Durdurmak için: `/iptal`")
+
+    for current_msg_id in todo_ids:
+        # HER MESAJDA İPTAL KONTROLÜ
+        if ABORT_FLAG:
+            await status_msg.edit(f"🛑 **İşlem Kullanıcı Tarafından Durduruldu!**\nSon işlenen: {processed_count}")
+            return
+
+        sent = False
+        retry = 0
+        
+        while not sent and retry < 5:
+            current_ub = active_bots[bot_index]
+            
             try:
+                # Taze Mesaj Çek (File Ref Fix)
+                msg = await current_ub.get_messages(src_id, current_msg_id)
+                
+                if not msg or msg.empty or msg.service:
+                    sent = True
+                    break
+
                 if msg.media:
                     caption = msg.caption or ""
-                    # İNDİRME
                     file_path = await current_ub.download_media(msg)
                     if file_path:
-                        # YÜKLEME
                         if msg.photo: await current_ub.send_photo(dst_id, file_path, caption=caption)
                         elif msg.video: await current_ub.send_video(dst_id, file_path, caption=caption)
                         elif msg.document: await current_ub.send_document(dst_id, file_path, caption=caption)
@@ -451,41 +437,41 @@ async def transfer_final(client, message):
                     await current_ub.send_message(dst_id, msg.text)
                     sent = True
                 
-                time.sleep(3) # Spam koruması
+                time.sleep(2) # Hız ayarı (Güvenli)
 
             except FloodWait as e:
-                print(f"⚠️ Bot {active_bot_index+1} FloodWait: {e.value}sn.")
-                active_bot_index = (active_bot_index + 1) % len(USERBOTS)
+                wait_sec = e.value
+                bot_index = (bot_index + 1) % len(active_bots)
+                print(f"⚠️ FloodWait {wait_sec}sn. Bot {bot_index+1} geçti.")
                 time.sleep(2)
-                retry_count += 1
+                retry += 1
             except Exception as e:
-                print(f"⚠️ Bot {active_bot_index+1} Hatası: {e}")
-                # Eğer bot grupta değilse veya peer hatası verirse diğer bota geç
-                active_bot_index = (active_bot_index + 1) % len(USERBOTS)
-                retry_count += 1
+                print(f"Hata (ID: {current_msg_id}): {e}")
+                bot_index = (bot_index + 1) % len(active_bots)
+                retry += 1
                 time.sleep(1)
 
         if sent:
-            processed_now += 1
-            save_progress(src_id, msg.id)
+            processed_count += 1
+            save_progress(src_id, current_msg_id)
             
-            if processed_now % 5 == 0:
+            if processed_count % 5 == 0:
                 try:
-                    bar = get_progress_bar(processed_now, total_todo)
-                    panel = (
+                    bar = get_progress_bar(processed_count, total_todo)
+                    text = (
                         f"🔄 **CANLI TRANSFER**\n"
                         f"━━━━━━━━━━━━━━━━━━\n"
                         f"📊 {bar}\n"
-                        f"✅ **Atılan:** {processed_now} / {total_todo}\n"
-                        f"🤖 **Aktif Bot:** {active_bot_index + 1}\n"
+                        f"✅ **Atılan:** {processed_count} / {total_todo}\n"
+                        f"🤖 **Aktif Bot:** {bot_index + 1}\n"
+                        f"🛑 Durdurmak için: `/iptal`\n"
                         f"━━━━━━━━━━━━━━━━━━"
                     )
-                    await status_msg.edit(panel)
+                    await status_msg.edit(text)
                 except: pass
 
-    await status_msg.edit(f"🏁 **TAMAMLANDI!**\nToplam {processed_now} içerik başarıyla kopyalandı.")
+    await status_msg.edit(f"🏁 **BİTTİ!**\nToplam {processed_count} mesaj kopyalandı.")
     if os.path.exists(f"log_{src_id}.txt"): os.remove(f"log_{src_id}.txt")
-
 # ==================== 9. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
@@ -578,6 +564,7 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
