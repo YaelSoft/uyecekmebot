@@ -269,7 +269,7 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== 8. TRANSFER (V13 - HİBRİT / LİNK -> TOPIC DESTEKLİ) ====================
+# ==================== 8. TRANSFER (V15 - FULL LINK OTOMASYON + TOPIC DESTEK) ====================
 import time
 import asyncio
 import os
@@ -293,41 +293,54 @@ def get_progress_bar(current, total):
     bar = "▓" * finished_length + "░" * (10 - finished_length)
     return f"[{bar}] %{int(percentage * 100)}"
 
-# --- LİNK/ID ÇÖZÜCÜ ---
-async def join_and_resolve(input_str):
-    target_id = None
+# --- SİHİRLİ LİNK ÇÖZÜCÜ (TOPIC + MSG ID + GROUP ID) ---
+async def analyze_link(input_str, ub):
+    data = {
+        "chat_id": None,
+        "topic_id": None,
+        "msg_id": 0 # Başlangıç mesajı
+    }
+    
     input_str = str(input_str).strip()
-    for ub in USERBOTS:
-        try:
-            if "t.me" in input_str:
-                if "+" in input_str or "joinchat" in input_str:
-                    try: chat = await ub.join_chat(input_str)
-                    except: chat = await ub.get_chat(input_str)
-                elif "c/" in input_str:
-                    clean = input_str.split("c/")[1].split("/")[0]
-                    target_id = int("-100" + clean)
-                    return target_id
-                else:
-                    username = input_str.split("t.me/")[-1].replace("/", "")
-                    chat = await ub.join_chat(username)
-                if chat: target_id = chat.id
-            else:
-                target_id = int(input_str)
-                await ub.get_chat(target_id)
-        except: pass
-    return target_id
+    
+    # 1. Eğer Sadece ID ise (-100xxxx)
+    if input_str.startswith("-100") or (input_str.isdigit() and len(input_str) > 5):
+        data["chat_id"] = int(input_str)
+        return data
 
-# --- MESAJ LİNKİNDEN ID ÇIKARMA ---
-def extract_id_from_link(link_or_id):
-    link_or_id = str(link_or_id).strip()
-    if link_or_id.isdigit(): return int(link_or_id)
-    if "t.me/c/" in link_or_id:
-        try: return int(link_or_id.split("/")[-1])
-        except: return 0
-    if "t.me/" in link_or_id:
-        try: return int(link_or_id.split("/")[-1])
-        except: return 0
-    return 0
+    # 2. Eğer Link ise
+    if "t.me/" in input_str:
+        try:
+            # Gruba katılmayı/görmeyi dene
+            if "+" in input_str or "joinchat" in input_str:
+                try: chat = await ub.join_chat(input_str)
+                except: chat = await ub.get_chat(input_str)
+                data["chat_id"] = chat.id
+            
+            elif "c/" in input_str: # Örn: t.me/c/112233/55/999 (Grup/Topic/Msg)
+                # Linki parçala
+                parts = input_str.split("c/")[1].split("/")
+                # parts[0] = Grup ID (tiresiz)
+                data["chat_id"] = int("-100" + parts[0])
+                
+                if len(parts) == 3: # Topicli Link (Grup/Topic/Msg)
+                    data["topic_id"] = int(parts[1])
+                    data["msg_id"] = int(parts[2])
+                elif len(parts) == 2: # Normal Link (Grup/Msg)
+                    data["msg_id"] = int(parts[1])
+            
+            else: # Örn: t.me/kullaniciadi/99
+                parts = input_str.split("t.me/")[1].split("/")
+                username = parts[0]
+                chat = await ub.join_chat(username)
+                data["chat_id"] = chat.id
+                if len(parts) > 1:
+                    data["msg_id"] = int(parts[1])
+                    
+        except Exception as e:
+            print(f"Link analiz hatası: {e}")
+
+    return data
 
 @bot.on_message(filters.command("iptal") & filters.private)
 async def stop_process(client, message):
@@ -336,82 +349,84 @@ async def stop_process(client, message):
     await message.reply("🛑 **DURDURULDU.**")
 
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer_hybrid(client, message):
+async def transfer_ultimate(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
     user_id = message.from_user.id
     active_bots = USERBOTS[:2]
-
-    # 🛡️ HIZ AYARI (3 Saniye = Güvenli/Hızlı Dengesi)
-    SAFETY_DELAY = 3
+    SAFETY_DELAY = 3 # Güvenli Hız
 
     if not active_bots: await message.reply("❌ Userbot yok!"); return
 
     try:
-        # Komut: /transfer KAYNAK HEDEF BASLANGIC_LINKI [HEDEF_TOPIC_ID]
+        # Komut: /transfer [KAYNAK_LINK] [HEDEF_LINK]
         args = message.command
         src_input = args[1]
         dst_input = args[2]
-        start_point_input = args[3] if len(args) > 3 else "0"
-        
-        # 4. Argüman varsa Topic ID'dir, yoksa None (Normal kanal)
-        dest_topic_id = int(args[4]) if len(args) > 4 else None
-        
     except:
         await message.reply(
             "⚠️ **Kullanım:**\n"
-            "`/transfer KAYNAK HEDEF BAŞLANGIÇ_LİNKİ [HEDEF_TOPIC_ID]`\n\n"
-            "📌 **Örnek (Topic'e Atmak İçin):**\n"
-            "`/transfer -100Kaynak -100Hedef https://t.me/c/xx/999 445`\n"
-            "*(999 nolu mesajdan başlar, Hedef gruptaki 445 nolu topic'e atar)*"
+            "`/transfer [KAYNAK_MESAJ_LINKI] [HEDEF_TOPIC_LINKI]`\n\n"
+            "💡 **İpucu:**\n"
+            "Kaynak gruptaki başlamak istediğin mesajın linkini ve\n"
+            "Hedef gruptaki atmak istediğin Topic'in linkini yapıştır."
         )
         return
 
-    dest_type = f"Topic ID: {dest_topic_id}" if dest_topic_id else "Normal Kanal"
-    status_msg = await message.reply(f"🛡️ **HİBRİT TRANSFER...**\nMod: {dest_type}")
+    status_msg = await message.reply(f"🔍 **LİNKLER ANALİZ EDİLİYOR...**")
 
-    src_id = await join_and_resolve(src_input)
-    dst_id = await join_and_resolve(dst_input)
-
-    if not src_id or not dst_id:
-        await status_msg.edit(f"❌ **HATA:** ID Bulunamadı.")
-        return
-
-    start_msg_id = extract_id_from_link(start_point_input)
-    
-    if start_msg_id > 0:
-        await status_msg.edit(f"📍 **BAŞLANGIÇ:** `{start_msg_id}` nolu mesaj ve sonrası...\nHedef: {dest_type}")
-    else:
-        await status_msg.edit(f"📦 **LİSTE ÇEKİLİYOR...**\nEn baştan başlanacak.")
-    
-    # 2. LİSTELEME
-    msg_ids = []
+    # Analiz için 1. botu kullan
     scanner = active_bots[0]
     
+    # Kaynak ve Hedef verilerini çöz
+    src_data = await analyze_link(src_input, scanner)
+    dst_data = await analyze_link(dst_input, scanner)
+
+    if not src_data["chat_id"] or not dst_data["chat_id"]:
+        await status_msg.edit(f"❌ **HATA:** Gruplara erişilemedi. Botların grupta olduğundan emin ol.")
+        return
+
+    # Özet Bilgi Mesajı
+    info_text = (
+        f"✅ **AYARLAR TAMAM!**\n\n"
+        f"📤 **Kaynak:** `{src_data['chat_id']}`\n"
+        f"📂 **Kaynak Topic:** {src_data['topic_id'] if src_data['topic_id'] else 'Yok (Genel)'}\n"
+        f"📍 **Başlangıç Mesajı:** {src_data['msg_id']}\n\n"
+        f"📥 **Hedef:** `{dst_data['chat_id']}`\n"
+        f"📂 **Hedef Topic:** {dst_data['topic_id'] if dst_data['topic_id'] else 'Yok (Genel)'}\n"
+    )
+    await status_msg.edit(info_text + "\n📦 **Liste Çekiliyor...**")
+
+    # 2. LİSTELEME
+    msg_ids = []
     try:
-        async for msg in scanner.get_chat_history(src_id):
+        # Topic varsa sadece o topic'i çek, yoksa genel
+        chat_args = {}
+        if src_data["topic_id"]:
+            chat_args["message_thread_id"] = src_data["topic_id"]
+
+        async for msg in scanner.get_chat_history(src_data["chat_id"], **chat_args):
             if ABORT_FLAG: break
             msg_ids.append(msg.id)
     except Exception as e:
-        await status_msg.edit(f"❌ **Liste Hatası:** {e}")
+        await status_msg.edit(f"❌ **Liste Hatası:** {e}\nEğer grup 'Topic'li ise ve Topic ID bulamadıysam hata verir.")
         return
 
     if ABORT_FLAG: await status_msg.edit("🛑 İptal."); return
 
-    # 3. SIRALAMA
+    # 3. SIRALAMA VE BAŞLANGIÇ NOKTASI
     msg_ids.reverse() # Eskiden Yeniye
     
-    last_processed_id = load_progress(src_id)
+    start_point = src_data["msg_id"]
+    last_processed = load_progress(src_data["chat_id"])
     
-    if start_msg_id > 0:
-        todo_ids = [mid for mid in msg_ids if mid >= start_msg_id]
-        if not todo_ids:
-            await status_msg.edit(f"⚠️ **HATA:** `{start_msg_id}` ID'li mesaj bulunamadı!")
-            return
-        await status_msg.edit(f"⏩ **AYARLANDI:** {start_msg_id} ve sonrası seçildi.\nAdet: {len(todo_ids)}")
+    # Eğer linkte mesaj ID varsa oradan başla, yoksa logdan devam et
+    if start_point > 0:
+        todo_ids = [mid for mid in msg_ids if mid >= start_point]
+        await status_msg.edit(f"⏩ **BAŞLANGIÇ:** {start_point} ve sonrası.\nAdet: {len(todo_ids)}")
     else:
-        todo_ids = [mid for mid in msg_ids if mid > last_processed_id]
+        todo_ids = [mid for mid in msg_ids if mid > last_processed]
 
     total_todo = len(todo_ids)
     
@@ -419,12 +434,11 @@ async def transfer_hybrid(client, message):
         await status_msg.edit(f"✅ **Zaten Güncel!**")
         return
 
-    # 4. TRANSFER DÖNGÜSÜ
+    # 4. TRANSFER
     processed_count = 0
     bot_index = 0
-    bot_names = ["1 (Asıl)", "2 (Yedek)"]
     
-    await status_msg.edit(f"🚀 **BAŞLIYOR...**\nKalan: {total_todo}\nHedef Topic: {dest_topic_id if dest_topic_id else 'Yok (Ana Kanal)'}")
+    await status_msg.edit(f"🚀 **TRANSFER BAŞLADI**\nKalan: {total_todo}")
 
     for current_msg_id in todo_ids:
         if ABORT_FLAG: await status_msg.edit("🛑 Durduruldu."); return
@@ -435,56 +449,48 @@ async def transfer_hybrid(client, message):
         while not sent and retry < len(active_bots) * 2: 
             current_ub = active_bots[bot_index]
             try:
-                msg = await current_ub.get_messages(src_id, current_msg_id)
-                if not msg or msg.empty or msg.service:
-                    sent = True; break
+                msg = await current_ub.get_messages(src_data["chat_id"], current_msg_id)
+                if not msg or msg.empty or msg.service: sent = True; break
 
-                # Argümanları hazırla (Topic varsa ekle, yoksa ekleme)
+                # HEDEF TOPIC AYARI
                 send_args = {}
-                if dest_topic_id:
-                    send_args["message_thread_id"] = dest_topic_id
+                if dst_data["topic_id"]:
+                    send_args["message_thread_id"] = dst_data["topic_id"]
 
                 if msg.media:
                     caption = msg.caption or ""
                     file_path = await current_ub.download_media(msg)
                     if file_path:
-                        if msg.photo: await current_ub.send_photo(dst_id, file_path, caption=caption, **send_args)
-                        elif msg.video: await current_ub.send_video(dst_id, file_path, caption=caption, **send_args)
-                        elif msg.document: await current_ub.send_document(dst_id, file_path, caption=caption, **send_args)
-                        elif msg.audio: await current_ub.send_audio(dst_id, file_path, caption=caption, **send_args)
-                        elif msg.voice: await current_ub.send_voice(dst_id, file_path, **send_args)
-                        os.remove(file_path)
-                        sent = True
+                        if msg.photo: await current_ub.send_photo(dst_data["chat_id"], file_path, caption=caption, **send_args)
+                        elif msg.video: await current_ub.send_video(dst_data["chat_id"], file_path, caption=caption, **send_args)
+                        elif msg.document: await current_ub.send_document(dst_data["chat_id"], file_path, caption=caption, **send_args)
+                        elif msg.audio: await current_ub.send_audio(dst_data["chat_id"], file_path, caption=caption, **send_args)
+                        os.remove(file_path); sent = True
                 elif msg.text:
-                    await current_ub.send_message(dst_id, msg.text, **send_args)
+                    await current_ub.send_message(dst_data["chat_id"], msg.text, **send_args)
                     sent = True
                 
                 await asyncio.sleep(SAFETY_DELAY) 
 
             except (FloodWait, PeerFlood, UserRestricted) as e:
                 wait_sec = e.value if isinstance(e, FloodWait) else 120
-                print(f"⚠️ Hız Limiti! Bot {bot_names[bot_index]} dinleniyor ({wait_sec}s).")
                 bot_index = (bot_index + 1) % len(active_bots)
-                retry += 1
-                await asyncio.sleep(5) 
+                retry += 1; await asyncio.sleep(5) 
             except Exception as e:
-                print(f"Hata: {e}")
                 bot_index = (bot_index + 1) % len(active_bots)
-                retry += 1
-                await asyncio.sleep(2)
+                retry += 1; await asyncio.sleep(2)
 
         if sent:
             processed_count += 1
-            save_progress(src_id, current_msg_id)
+            save_progress(src_data["chat_id"], current_msg_id)
             if processed_count % 5 == 0:
                 try:
                     bar = get_progress_bar(processed_count, total_todo)
-                    text = (f"🛡️ **HİBRİT TRANSFER**\n{bar}\n✅ {processed_count} / {total_todo}\n🤖 Bot: {bot_names[bot_index]}")
-                    await status_msg.edit(text)
+                    await status_msg.edit(f"🔄 **AKTARIM (V15)**\n{bar}\n✅ {processed_count} / {total_todo}")
                 except: pass
 
-    await status_msg.edit(f"🏁 **TAMAMLANDI!**\n{processed_count} içerik başarıyla aktarıldı.")
-    if os.path.exists(f"log_{src_id}.txt"): os.remove(f"log_{src_id}.txt")
+    await status_msg.edit(f"🏁 **TAMAMLANDI!**\n{processed_count} içerik aktarıldı.")
+    if os.path.exists(f"log_{src_data['chat_id']}.txt"): os.remove(f"log_{src_data['chat_id']}.txt")
 # ==================== 9. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
@@ -762,6 +768,7 @@ async def topic_transfer_safe(client, message):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
