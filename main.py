@@ -475,6 +475,163 @@ async def transfer_final_safe(client, message):
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
 @bot.on_message(filters.command("delvip") & filters.user(OWNER_ID))
 async def delvip(c, m): set_vip(int(m.command[1]), False); await m.reply("❌")
+    # ==================== EKSTRA: TOPIC ARAÇLARI (V10 EKLENTİSİ) ====================
+
+# 1. KONU ID'LERİNİ BULMA KOMUTU
+@bot.on_message(filters.command("konular") & filters.private)
+async def list_topics(client, message):
+    if not USERBOTS: await message.reply("❌ Userbot yok!"); return
+    try:
+        target_group = int(message.command[1])
+    except:
+        await message.reply("⚠️ Kullanım: `/konular -100GRUP_ID`")
+        return
+
+    status = await message.reply(f"🔍 **Konular Taranıyor...**\n`{target_group}`")
+    
+    text = f"📂 **GRUPTAKİ KONULAR (TOPICS):**\n\n"
+    ub = USERBOTS[0]
+    
+    try:
+        # Forum konularını çek
+        async for forum_topic in ub.get_forum_topics(target_group, limit=100):
+            text += f"🔹 **{forum_topic.title}**\n🆔 ID: `{forum_topic.id}`\n\n"
+        
+        # Eğer "Genel" konusu varsa onun ID'si genellikle 1'dir ama listede çıkmayabilir.
+        text += f"🔸 **Genel (General)**\n🆔 ID: `1` (Genelde 1 olur)\n"
+        
+        await status.edit(text)
+    except Exception as e:
+        await status.edit(f"❌ **Hata:** Bu grup bir Forum değil veya yetki yok.\nHata: {e}")
+
+# 2. TOPIC'TEN TOPIC'E TRANSFER KOMUTU
+@bot.on_message(filters.command("topictransfer") & filters.private)
+async def topic_transfer_v10(client, message):
+    # Global değişkenleri çek
+    global ABORT_FLAG
+    ABORT_FLAG = False
+    
+    user_id = message.from_user.id
+    active_bots = USERBOTS[:2]
+    SAFETY_DELAY = 3 # V10 ile aynı hız
+
+    try:
+        # Komut: /topictransfer KAYNAK_GRUP KAYNAK_TOPIC HEDEF_GRUP HEDEF_TOPIC BASLANGIC
+        args = message.command
+        src_grp = int(args[1])
+        src_topic = int(args[2])
+        dst_grp = int(args[3])
+        dst_topic = int(args[4])
+        manual_start = int(args[5]) if len(args) > 5 else 0
+    except:
+        await message.reply(
+            "⚠️ **Kullanım:**\n"
+            "`/topictransfer [KAYNAK_GRUP] [KAYNAK_TOPIC_ID] [HEDEF_GRUP] [HEDEF_TOPIC_ID] [BASLANGIC_SAYISI]`\n\n"
+            "📌 **Örnek:**\n"
+            "`/topictransfer -100111 45 -100222 99 2560`\n"
+            "*(111 nolu grubun 45. konusundan al, 222 nolu grubun 99. konusuna at)*"
+        )
+        return
+
+    status_msg = await message.reply(f"🛡️ **KONU TRANSFERİ BAŞLIYOR...**\n{src_topic} -> {dst_topic}")
+
+    # LİSTELEME (Sadece o Topic)
+    msg_ids = []
+    scanner = active_bots[0]
+    
+    try:
+        # message_thread_id PARAMETRESİ İLE SADECE O KONUYU ÇEKİYORUZ
+        async for msg in scanner.get_chat_history(src_grp, message_thread_id=src_topic):
+            if ABORT_FLAG: break
+            msg_ids.append(msg.id)
+    except Exception as e:
+        await status_msg.edit(f"❌ **Hata:** {e}"); return
+
+    if ABORT_FLAG: await status_msg.edit("🛑 İptal."); return
+
+    msg_ids.reverse()
+    
+    # Başlangıç Ayarı
+    if manual_start > 0:
+        # Manuel sayıdan büyük olanları al (Basit mantık)
+        # Not: msg_ids içindeki ID'ler her zaman sıralı olmayabilir ama genelde tutar.
+        # Daha güvenli yöntem: Sayı kadar atla.
+        # Ama senin isteğin ID bazlı olduğu için ID filtresi yapıyoruz:
+        todo_ids = [mid for mid in msg_ids if mid >= manual_start]
+    else:
+        # Topic transferi için ayrı log tutmadık, genelde manuel yaparsın diye.
+        # İstersen hepsini al:
+        todo_ids = msg_ids
+
+    total_todo = len(todo_ids)
+    if total_todo == 0: await status_msg.edit(f"✅ **Güncel/Bulunamadı!**"); return
+
+    # TRANSFER DÖNGÜSÜ
+    processed_count = 0
+    bot_index = 0
+    
+    await status_msg.edit(f"🚀 **BAŞLADI**\nKalan: {total_todo}")
+
+    for current_msg_id in todo_ids:
+        if ABORT_FLAG: await status_msg.edit("🛑 Durduruldu."); return
+        
+        sent = False
+        retry = 0
+        
+        while not sent and retry < len(active_bots) * 2:
+            current_ub = active_bots[bot_index]
+            try:
+                # O Topic'ten mesajı al
+                msg = await current_ub.get_messages(src_grp, current_msg_id)
+                
+                if not msg or msg.empty or msg.service: sent = True; break
+
+                # HEDEF TOPIC PARAMETRESİ
+                # message_thread_id = dst_topic (Burası önemli!)
+                send_args = {"message_thread_id": dst_topic}
+
+                if msg.media:
+                    caption = msg.caption or ""
+                    try:
+                        file_path = await current_ub.download_media(msg)
+                    except: file_path = None # İndiremezse geç
+
+                    if file_path:
+                        if msg.photo: await current_ub.send_photo(dst_grp, file_path, caption=caption, **send_args)
+                        elif msg.video: await current_ub.send_video(dst_grp, file_path, caption=caption, **send_args)
+                        elif msg.document: await current_ub.send_document(dst_grp, file_path, caption=caption, **send_args)
+                        elif msg.audio: await current_ub.send_audio(dst_grp, file_path, caption=caption, **send_args)
+                        elif msg.voice: await current_ub.send_voice(dst_grp, file_path, **send_args)
+                        elif msg.sticker: await current_ub.send_sticker(dst_grp, file_path, **send_args)
+                        elif msg.animation: await current_ub.send_animation(dst_grp, file_path, caption=caption, **send_args)
+                        
+                        os.remove(file_path); sent = True
+                    else:
+                        sent = True # Dosya yoksa atla
+                elif msg.text:
+                     if msg.text.strip():
+                        await current_ub.send_message(dst_grp, msg.text, **send_args)
+                     sent = True
+                else: sent = True
+
+                await asyncio.sleep(SAFETY_DELAY)
+
+            except (FloodWait, PeerFlood) as e:
+                wait = e.value if isinstance(e, FloodWait) else 60
+                bot_index = (bot_index + 1) % len(active_bots)
+                retry += 1; await asyncio.sleep(5)
+            except Exception as e:
+                # Hata olursa atla
+                sent = True 
+                break
+        
+        if sent:
+            processed_count += 1
+            if processed_count % 10 == 0:
+                try: await status_msg.edit(f"🛡️ **TOPIC AKTARIM**\n✅ {processed_count} / {total_todo}")
+                except: pass
+
+    await status_msg.edit("🏁 **TOPIC BİTTİ!**")
 # ==================== ID BULUCU (GİZLİ & YASAKLI GRUP FİX) ====================
 @bot.on_message(filters.command("id") & filters.private)
 async def id_finder(client, message):
@@ -747,6 +904,7 @@ async def topic_transfer_safe(client, message):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
