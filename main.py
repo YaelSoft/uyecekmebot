@@ -269,37 +269,60 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== TEK VE NET TRANSFER KODU (MANUEL GİRİŞ) ====================
+# ==================== 10. MANUEL TOPIC YEDEKLEME (GARANTİ YÖNTEM) ====================
 
-@bot.on_message(filters.command("baslat") & filters.private)
-async def transfer_manuel_fix(client, message):
-    # Kullanıcı ID kontrolü (İstersen burayı açarsın)
-    # if message.from_user.id != OWNER_ID: return
+@bot.on_message(filters.command("yedekle") & filters.private)
+async def manual_topic_backup(client, message):
+    user_id = message.from_user.id
+    active_bots = USERBOTS[:2]
+    # İletim kapalı grupta ban yememek için 3 saniye idealdir, düşürme.
+    SAFETY_DELAY = 3 
 
     try:
-        # KOMUT: /baslat KAYNAK_ID HEDEF_ID HEDEF_TOPIC_ID BASLANGIC_MESAJ_ID
+        # KOMUT: /yedekle [KAYNAK_GRUP_ID] [KAYNAK_TOPIC_ID] [HEDEF_GRUP_ID] [HEDEF_TOPIC_ID]
         args = message.command
-        src_id = int(args[1])
-        dst_id = int(args[2])
-        dst_topic = int(args[3])
-        start_id = int(args[4])
+        src_grp = int(args[1])   # Örn: -1001111111
+        src_topic = int(args[2]) # Örn: 44
+        dst_grp = int(args[3])   # Örn: -1002222222
+        dst_topic = int(args[4]) # Örn: 1
     except:
-        await message.reply("⚠️ **KULLANIM:** `/baslat -100KAYNAK -100HEDEF KONU_ID BASLANGIC_ID`")
+        await message.reply(
+            "⚠️ **NET KULLANIM:**\n"
+            "`/yedekle KAYNAK_GRUP KAYNAK_TOPIC HEDEF_GRUP HEDEF_TOPIC`\n\n"
+            "📌 **Örnek:**\n"
+            "`/yedekle -100987654321 52 -100123456789 1`"
+        )
         return
 
-    status = await message.reply(f"🚀 **BAŞLIYOR...**\nKaynak: `{src_id}`\nHedef: `{dst_id}` (Konu: `{dst_topic}`)\nBaşlangıç: `{start_id}`")
+    status = await message.reply(f"🛡️ **YEDEKLEME BAŞLIYOR...**\nKaynak Topic: `{src_topic}`\nHedef Topic: `{dst_topic}`\n\nMesajlar taranıyor (Grubun büyüklüğüne göre sürer)...")
 
-    ub = USERBOTS[0] # İlk botu kullan
     msg_ids = []
+    ub = USERBOTS[0]
 
-    # 1. LİSTELEME (Sadece ID çeker, hata vermez)
+    # 1. TARAMA (MANUEL FİLTRE - EN SAĞLAMI)
     try:
-        async for msg in ub.get_chat_history(src_id):
-            # Sadece senin istediğin mesajdan yeni olanları listeye al
-            if msg.id >= start_id:
+        # Parametresiz çekiyoruz, hata vermesin diye.
+        async for msg in ub.get_chat_history(src_grp):
+            is_target = False
+            
+            # --- MESAJ BU TOPIC'E Mİ AİT? ---
+            try:
+                # 1. Yöntem: message_thread_id (Yeni)
+                if getattr(msg, "message_thread_id", None) == src_topic:
+                    is_target = True
+                # 2. Yöntem: reply_to_message_id (Eski/Forum mantığı)
+                elif getattr(msg, "reply_to_message_id", None) == src_topic:
+                    is_target = True
+                # 3. Yöntem: Mesajın kendi ID'si Topic ID ise (Konu açılış mesajı)
+                elif msg.id == src_topic:
+                    is_target = True
+            except: pass
+
+            if is_target:
                 msg_ids.append(msg.id)
+
     except Exception as e:
-        await status.edit(f"❌ **LİSTE ÇEKİLEMEDİ:** {e}\n(Bot kaynak grupta mı?)")
+        await status.edit(f"❌ **LİSTELEME HATASI:** {e}\nID'leri kontrol et.")
         return
 
     # Eskiden yeniye sırala
@@ -307,66 +330,77 @@ async def transfer_manuel_fix(client, message):
     total = len(msg_ids)
 
     if total == 0:
-        await status.edit("❌ **MESAJ BULUNAMADI.** Başlangıç ID'si çok büyük olabilir.")
-        return
+        await status.edit(f"❌ **MESAJ BULUNAMADI.**\nKaynak Topic ID ({src_topic}) doğru mu? Grupta bu ID ile konu var mı?"); return
 
-    await status.edit(f"✅ **LİSTE TAMAM.**\nToplam: {total} mesaj aktarılacak.")
+    await status.edit(f"🚀 **AKTARIM BAŞLADI**\nToplam: {total} Mesaj")
     
     count = 0
-    
+    fail = 0
+
     # 2. AKTARIM DÖNGÜSÜ
     for msg_id in msg_ids:
         try:
-            # Mesajı getir
-            msg = await ub.get_messages(src_id, msg_id)
-            
-            # Boşsa geç
+            # Mesajı taze çek
+            msg = await ub.get_messages(src_grp, msg_id)
             if not msg or msg.empty or msg.service: continue
 
-            # --- HEDEF KONU AYARI (ESKİ SÜRÜM GARANTİSİ) ---
-            # Mesaja 'reply' atarak topic'e düşmesini sağlarız.
-            target_params = {"reply_to_message_id": dst_topic}
+            # --- HEDEF AYARI (Reply Yöntemi - Şaşmaz) ---
+            send_args = {"reply_to_message_id": dst_topic}
 
-            # İNDİRME VE GÖNDERME
+            # İNDİR VE GÖNDER
             if msg.media:
+                path = None
                 try:
+                    # İndirmeyi dene
                     path = await ub.download_media(msg)
-                    if path:
+                except:
+                    # İndiremezsen (DRM/Hata) geç
+                    fail += 1
+                    continue
+
+                if path:
+                    # Dosya indiyse gönder
+                    try:
                         caption = msg.caption or ""
-                        if msg.photo: await ub.send_photo(dst_id, path, caption=caption, **target_params)
-                        elif msg.video: await ub.send_video(dst_id, path, caption=caption, **target_params)
-                        elif msg.document: await ub.send_document(dst_id, path, caption=caption, **target_params)
-                        elif msg.audio: await ub.send_audio(dst_id, path, caption=caption, **target_params)
-                        elif msg.voice: await ub.send_voice(dst_id, path, **target_params)
-                        elif msg.sticker: await ub.send_sticker(dst_id, path, **target_params)
+                        if msg.photo: await ub.send_photo(dst_grp, path, caption=caption, **send_args)
+                        elif msg.video: await ub.send_video(dst_grp, path, caption=caption, **send_args)
+                        elif msg.document: await ub.send_document(dst_grp, path, caption=caption, **send_args)
+                        elif msg.audio: await ub.send_audio(dst_grp, path, caption=caption, **send_args)
+                        elif msg.voice: await ub.send_voice(dst_grp, path, **send_args)
+                        elif msg.sticker: await ub.send_sticker(dst_grp, path, **send_args)
+                        elif msg.animation: await ub.send_animation(dst_grp, path, caption=caption, **send_args)
                         
-                        os.remove(path)
                         count += 1
-                except Exception as e:
-                    print(f"Medya hatası (ID: {msg_id}): {e}")
-                    # Hata varsa geç, durma
-                    pass
+                    except Exception as e:
+                        print(f"Gönderim Hatası: {e}")
+                        fail += 1
+                    finally:
+                        # Dosyayı temizle
+                        if os.path.exists(path): os.remove(path)
+                else:
+                    fail += 1
 
             elif msg.text:
                 if msg.text.strip():
-                    await ub.send_message(dst_id, msg.text, **target_params)
-                    count += 1
+                    try:
+                        await ub.send_message(dst_grp, msg.text, **send_args)
+                        count += 1
+                    except: fail += 1
 
-            # 3 SANİYE BEKLE (Ban yememek için)
-            await asyncio.sleep(3)
+            # 3 SANİYE MOLA (Ban Yememek İçin)
+            await asyncio.sleep(SAFETY_DELAY)
 
-            # Her 10 mesajda bir bilgi ver
             if count % 10 == 0:
-                try: await status.edit(f"🔄 **AKTARILIYOR...**\n{count} / {total}")
+                try: await status.edit(f"🔄 **YEDEKLENİYOR...**\n✅ {count} / {total}")
                 except: pass
 
         except FloodWait as e:
             await asyncio.sleep(e.value + 5)
-        except Exception as e:
-            print(f"Genel Hata (ID: {msg_id}): {e}")
-            pass # Hata olsa da durma, devam et
+        except Exception:
+            fail += 1
+            pass # Genel hata olursa durma, devam et.
 
-    await status.edit(f"🏁 **BİTTİ!** Toplam {count} mesaj aktarıldı.")
+    await status.edit(f"🏁 **BİTTİ!**\n✅ Başarılı: {count}\n❌ Atlanan/Hatalı: {fail}")
 # ==================== 9. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
@@ -390,6 +424,7 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
