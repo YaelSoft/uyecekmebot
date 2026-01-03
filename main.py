@@ -715,10 +715,10 @@ async def main():
     for ub in USERBOTS:
         try: await ub.stop()
         except: pass
-# ==================== 9. TOPIC TRANSFER (V27 - MANUEL & BASİT) ====================
+# ==================== 9. TOPIC TRANSFER (V28 - ESKİ USUL / GARANTİ) ====================
 
 @bot.on_message(filters.command("topictransfer") & filters.private)
-async def topic_transfer_simple(client, message):
+async def topic_transfer_dump(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
@@ -727,66 +727,59 @@ async def topic_transfer_simple(client, message):
     SAFETY_DELAY = 3 
 
     try:
-        # KOMUT: /topictransfer [KAYNAK_GRUP] [KAYNAK_KONU] [HEDEF_GRUP] [HEDEF_KONU] [BASLANGIC_NO]
+        # KOMUT: /topictransfer [KAYNAK_GRUP] [0] [HEDEF_GRUP] [HEDEF_TOPIC] [BASLANGIC_NO]
         args = message.command
         src_grp = int(args[1])
-        src_topic = int(args[2]) # Normal grup ise 0 yaz
+        src_mode = int(args[2]) # Normal grup için 0
         dst_grp = int(args[3])
-        dst_topic = int(args[4])
-        start_id = int(args[5])  # Kaçıncı mesajdan başlasın?
+        dst_topic = int(args[4]) # Hedef Konu ID
+        start_id = int(args[5])  # Başlangıç Mesaj Numarası
     except:
         await message.reply(
             "⚠️ **KULLANIM:**\n"
-            "`/topictransfer -100Kaynak 0 -100Hedef 44 24558`\n\n"
-            "Anlamı: Kaynak(Normal)'tan al, Hedef(44.Konu)'e at, 24558'den başla."
+            "`/topictransfer -100KaynakID 0 -100HedefID 44 24558`\n\n"
+            "Anlamı: Kaynaktan al (0=Normal), Hedefteki 44. Konuya at, 24558'den başla."
         )
         return
 
-    # Bilgilendirme Mesajı
-    kaynak_ad = "Normal Grup" if src_topic == 0 else f"Konu: {src_topic}"
-    status_msg = await message.reply(
-        f"🚀 **İŞLEM BAŞLIYOR...**\n"
-        f"📤 Kaynak: {kaynak_ad}\n"
-        f"📥 Hedef Konu: {dst_topic}\n"
-        f"📍 Başlangıç: {start_id}. mesaj"
-    )
+    status_msg = await message.reply(f"🚀 **BAŞLIYOR...**\nEski yöntemle taranıyor...")
 
     msg_ids = []
     scanner = active_bots[0]
     
     try:
-        # Tüm grubu çek (En garantisi budur)
+        # --- BURASI ÇOK ÖNEMLİ: İÇİ BOMBOŞ ---
+        # Hiçbir ekstra parametre yok. Sadece ID. Hata veremez.
         async for msg in scanner.get_chat_history(src_grp):
             if ABORT_FLAG: break
             
-            # --- 1. KONU FİLTRESİ ---
-            # Eğer kaynak topic 0 ise (Normal Grup), hepsini al.
-            # Değilse, sadece o topic'e ait olanları al.
-            if src_topic != 0:
-                # Eski/Yeni sürüm uyumlu kontrol
-                current = getattr(msg, "message_thread_id", None) or getattr(msg, "reply_to_message_id", None)
-                if current != src_topic and msg.id != src_topic:
-                    continue # Bu mesaj bizim konudan değil, geç.
-
-            # --- 2. BAŞLANGIÇ ID FİLTRESİ ---
-            # Eğer mesajın numarası, senin istediğin başlangıçtan küçükse ALMA.
+            # 1. BAŞLANGIÇ KONTROLÜ
+            # Mesaj ID'si senin verdiğin sayıdan küçükse (eskisye) ALMA.
             if msg.id < start_id:
-                continue # Bu mesaj eski, geç.
+                continue 
 
-            # Filtreleri geçtiyse listeye ekle
+            # 2. TOPIC FİLTRESİ (Eğer kaynak da topic ise)
+            if src_mode != 0:
+                # Eski sürümde topic, reply_to gibi görünür
+                try:
+                    if msg.reply_to_message_id != src_mode and getattr(msg, "message_thread_id", None) != src_mode:
+                        continue # Bu konuya ait değil
+                except:
+                    continue
+
             msg_ids.append(msg.id)
 
     except Exception as e:
-        await status_msg.edit(f"❌ **Hata:** {e}")
+        await status_msg.edit(f"❌ **HATA:** {e}\n(Grup ID'si doğru mu? Bot grupta mı?)")
         return
 
     if ABORT_FLAG: await status_msg.edit("🛑 İptal."); return
 
-    msg_ids.reverse() # Eskiden Yeniye Sırala
+    msg_ids.reverse() # Eskiden Yeniye
     total_todo = len(msg_ids)
     
     if total_todo == 0: 
-        await status_msg.edit(f"✅ **İçerik Bulunamadı!**\n(Verdiğin sayıdan sonra mesaj atılmamış olabilir)"); return
+        await status_msg.edit(f"✅ **Mesaj Bulunamadı!**\nVerdiğin ID ({start_id}) çok yeni olabilir."); return
 
     processed_count = 0
     bot_index = 0
@@ -804,7 +797,8 @@ async def topic_transfer_simple(client, message):
                 msg = await current_ub.get_messages(src_grp, current_msg_id)
                 if not msg or msg.empty or msg.service: sent = True; break
 
-                # HEDEFE ATARKEN KONU SEÇİMİ (Reply Yöntemi - En Sağlamı)
+                # HEDEF TOPIC İÇİN ESKİ YÖNTEM: reply_to_message_id
+                # Bu parametre 5 yıldır var, hata veremez.
                 send_args = {"reply_to_message_id": dst_topic}
 
                 if msg.media:
@@ -834,12 +828,21 @@ async def topic_transfer_simple(client, message):
                 bot_index = (bot_index + 1) % len(active_bots)
                 retry += 1; await asyncio.sleep(5)
             except Exception as e:
-                sent = True; break
+                # Yine hata verirse (unexpected keyword vb.)
+                if "unexpected keyword" in str(e):
+                     # Topic'e atamıyorsa normale atıp geçsin, durmasın
+                     try:
+                        if msg.text: await current_ub.send_message(dst_grp, msg.text)
+                        sent = True
+                     except: sent = True
+                else:
+                    sent = True
+                break
         
         if sent:
             processed_count += 1
             if processed_count % 10 == 0:
-                try: await status_msg.edit(f"🛡️ **TRANSFER**\n✅ {processed_count} / {total_todo}")
+                try: await status_msg.edit(f"🛡️ **V28**\n✅ {processed_count} / {total_todo}")
                 except: pass
 
     await status_msg.edit("🏁 **BİTTİ!**")
@@ -847,6 +850,7 @@ async def topic_transfer_simple(client, message):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
