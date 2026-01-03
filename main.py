@@ -269,11 +269,11 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== 8. TRANSFER (V20 - İLETİM KAPALI İÇİN ÖZEL TANK SÜRÜM) ====================
+# ==================== 8. TRANSFER (V21 - ÇÖP ÖĞÜTÜCÜ / BOŞ MESAJ FİLTRESİ) ====================
 import time
 import asyncio
 import os
-from pyrogram.errors import FloodWait, PeerFlood, UserRestricted
+from pyrogram.errors import FloodWait, PeerFlood, UserRestricted, MessageEmpty, MessageIdInvalid
 
 ABORT_FLAG = False
 
@@ -293,7 +293,7 @@ def get_progress_bar(current, total):
     bar = "▓" * finished_length + "░" * (10 - finished_length)
     return f"[{bar}] %{int(percentage * 100)}"
 
-# --- PARÇALAYICI (LİNK & ID) ---
+# --- PARÇALAYICI ---
 async def parse_input(input_str, ub):
     data = {"chat_id": None, "start_msg": 0}
     input_str = str(input_str).strip()
@@ -330,7 +330,7 @@ async def stop_process(client, message):
     await message.reply("🛑 **DURDURULDU.**")
 
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer_restricted_tank(client, message):
+async def transfer_v21_trash_compactor(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
@@ -347,20 +347,17 @@ async def transfer_restricted_tank(client, message):
         await message.reply("⚠️ **Kullanım:** `/transfer [KAYNAK_LINK] [HEDEF_LINK]`")
         return
 
-    status_msg = await message.reply(f"🛡️ **İLETİM KAPALI MODU (V20) BAŞLATILIYOR...**")
+    status_msg = await message.reply(f"🛡️ **V21 TRANSFER (HATA ATLAYICI) BAŞLATILIYOR...**")
 
     scanner = active_bots[0]
     src = await parse_input(src_link, scanner)
     dst = await parse_input(dst_link, scanner)
 
     if not src["chat_id"] or not dst["chat_id"]:
-        await status_msg.edit(f"❌ **HATA:** ID'ler çözülemedi. Botun grupta olduğundan emin ol.")
+        await status_msg.edit(f"❌ **HATA:** ID'ler çözülemedi.")
         return
 
     # 1. LİSTELEME
-    info = f"📍 Başlangıç: `{src['start_msg']}`. mesaj" if src['start_msg'] > 0 else "Otomatik"
-    await status_msg.edit(f"✅ **BAĞLANTI TAMAM**\n{info}\n\n📦 **Liste Çekiliyor...**")
-    
     msg_ids = []
     try:
         async for msg in scanner.get_chat_history(src["chat_id"]):
@@ -383,11 +380,11 @@ async def transfer_restricted_tank(client, message):
     if total_todo == 0:
         await status_msg.edit(f"✅ **Zaten Güncel!**"); return
 
+    await status_msg.edit(f"🚀 **BAŞLADI**\nKalan: {total_todo}\nMod: Hatayı Atla ve Devam Et")
+
     processed_count = 0
     bot_index = 0
     bot_names = ["1 (Asıl)", "2 (Yedek)"]
-    
-    await status_msg.edit(f"🚀 **TRANSFER BAŞLADI**\nKalan: {total_todo}\nMod: İndir/Yükle (Güvenli)")
 
     for current_msg_id in todo_ids:
         if ABORT_FLAG: await status_msg.edit("🛑 Durduruldu."); return
@@ -398,78 +395,78 @@ async def transfer_restricted_tank(client, message):
         while not sent and retry < len(active_bots) * 2: 
             current_ub = active_bots[bot_index]
             try:
-                # MESAJI ÇEK
                 msg = await current_ub.get_messages(src["chat_id"], current_msg_id)
                 
-                # Boş veya Servis Mesajıysa (örn: "Ahmet gruba katıldı") -> ATLA
+                # --- KRİTİK FİLTRE: BOŞ, SERVİS VEYA SİLİNMİŞ MESAJLARI YOK ET ---
                 if not msg or msg.empty or msg.service:
+                    # Bu mesajı "gönderilmiş" say ve döngüyü kır.
                     sent = True; break
 
-                # === MEDYA İŞLEME MERKEZİ ===
+                # --- 1. MEDYA ---
                 if msg.media:
                     file_path = None
                     try:
-                        # Önce indirmeyi dene
                         file_path = await current_ub.download_media(msg)
                     except Exception as e:
-                        print(f"İndirme Hatası ({current_msg_id}): {e}")
-                        # İndiremediysek yapacak bir şey yok, atla
+                        # İndirilemediyse (DRM vs) ATLA
                         sent = True; break
 
                     if file_path:
                         caption = msg.caption or ""
                         try:
-                            if msg.photo: 
-                                await current_ub.send_photo(dst["chat_id"], file_path, caption=caption)
-                            elif msg.video: 
-                                await current_ub.send_video(dst["chat_id"], file_path, caption=caption)
-                            elif msg.document: 
-                                await current_ub.send_document(dst["chat_id"], file_path, caption=caption)
-                            elif msg.audio: 
-                                await current_ub.send_audio(dst["chat_id"], file_path, caption=caption)
-                            elif msg.voice: 
-                                await current_ub.send_voice(dst["chat_id"], file_path)
-                            elif msg.video_note: 
-                                await current_ub.send_video_note(dst["chat_id"], file_path)
-                            elif msg.sticker:
-                                await current_ub.send_sticker(dst["chat_id"], file_path)
-                            elif msg.animation:
-                                await current_ub.send_animation(dst["chat_id"], file_path, caption=caption)
-                            else:
-                                # Tanımsız medya ise belge olarak at (Garanti olsun)
-                                await current_ub.send_document(dst["chat_id"], file_path, caption=caption)
+                            if msg.photo: await current_ub.send_photo(dst["chat_id"], file_path, caption=caption)
+                            elif msg.video: await current_ub.send_video(dst["chat_id"], file_path, caption=caption)
+                            elif msg.document: await current_ub.send_document(dst["chat_id"], file_path, caption=caption)
+                            elif msg.audio: await current_ub.send_audio(dst["chat_id"], file_path, caption=caption)
+                            elif msg.voice: await current_ub.send_voice(dst["chat_id"], file_path)
+                            elif msg.video_note: await current_ub.send_video_note(dst["chat_id"], file_path)
+                            elif msg.sticker: await current_ub.send_sticker(dst["chat_id"], file_path)
+                            elif msg.animation: await current_ub.send_animation(dst["chat_id"], file_path, caption=caption)
+                            else: await current_ub.send_document(dst["chat_id"], file_path, caption=caption)
                             
                             sent = True
-                        except Exception as upload_err:
-                            print(f"Yükleme Hatası ({current_msg_id}): {upload_err}")
-                            # Yükleyemediysek atla
-                            sent = True
+                        except Exception as up_err:
+                            print(f"Yükleme Hatası ({current_msg_id}): {up_err}")
+                            sent = True # Hata olsa da atla
                         finally:
-                            # Her türlü dosyayı sil
                             if os.path.exists(file_path): os.remove(file_path)
 
-                # === SADECE YAZI ===
+                # --- 2. METİN (BOŞ METİN KONTROLÜ EKLENDİ) ---
                 elif msg.text:
+                    # Eğer metin boşsa veya sadece boşluksa GÖNDERME
+                    if not msg.text.strip():
+                        sent = True; break
+                        
                     await current_ub.send_message(dst["chat_id"], msg.text)
                     sent = True
                 
-                # Diğer türler (Poll, Dice, Location vs.) -> Desteklemiyorsak atla
+                # --- 3. DİĞER (POLL, CONTACT, LOCATION) -> ATLA ---
                 else:
                     sent = True
 
-                await asyncio.sleep(SAFETY_DELAY)
+                await asyncio.sleep(SAFETY_DELAY) 
 
             except (FloodWait, PeerFlood, UserRestricted) as e:
-                wait_sec = e.value if isinstance(e, FloodWait) else 120
-                print(f"⚠️ Limit: {bot_names[bot_index]} ({wait_sec}s).")
+                wait_sec = e.value if isinstance(e, FloodWait) else 60
                 bot_index = (bot_index + 1) % len(active_bots)
                 retry += 1; await asyncio.sleep(5) 
-            except Exception as e:
-                # Genel hata (400 Message Empty vs.) -> ATLA VE DEVAM ET
-                print(f"Hata ID {current_msg_id}: {e}")
-                # Kritik hata değilse (bot banlı değilse) sıradakine geç
+            
+            except (MessageEmpty, MessageIdInvalid):
+                # İŞTE SENİN HATANIN ÇÖZÜMÜ BURASI
+                # Eğer "Message Empty" derse, bu hatayı yut ve devam et.
+                print(f"Bozuk Mesaj Atlandı: {current_msg_id}")
                 sent = True 
-                await asyncio.sleep(1)
+                break
+
+            except Exception as e:
+                print(f"Genel Hata ({current_msg_id}): {e}")
+                # Kritik olmayan hatalarda da atla
+                if "400" in str(e):
+                    sent = True 
+                    break
+                
+                bot_index = (bot_index + 1) % len(active_bots)
+                retry += 1; await asyncio.sleep(2)
 
         if sent:
             processed_count += 1
@@ -477,7 +474,7 @@ async def transfer_restricted_tank(client, message):
             if processed_count % 5 == 0:
                 try:
                     bar = get_progress_bar(processed_count, total_todo)
-                    await status_msg.edit(f"🛡️ **V20 TANK MODU**\n{bar}\n✅ {processed_count} / {total_todo}\n🤖 {bot_names[bot_index]}")
+                    await status_msg.edit(f"🛡️ **V21 TRANSFER**\n{bar}\n✅ {processed_count} / {total_todo}")
                 except: pass
 
     await status_msg.edit(f"🏁 **BİTTİ!**\n{processed_count} içerik aktarıldı.")
@@ -759,6 +756,7 @@ async def topic_transfer_safe(client, message):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
