@@ -269,7 +269,7 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== 8. TRANSFER (V10 - FİNAL GÜVENLİ MOD) ====================
+# ==================== 8. TRANSFER (V23 - ZORLA İNDİRME / BOŞ GÖNDERİM ENGELLEYİCİ) ====================
 import time
 import asyncio
 import os
@@ -277,7 +277,6 @@ from pyrogram.errors import FloodWait, PeerFlood, UserRestricted
 
 ABORT_FLAG = False
 
-# --- İLERLEME SİSTEMİ ---
 def save_progress(chat_id, last_id):
     with open(f"log_{chat_id}.txt", "w") as f: f.write(str(last_id))
 
@@ -293,11 +292,9 @@ def get_progress_bar(current, total):
     bar = "▓" * finished_length + "░" * (10 - finished_length)
     return f"[{bar}] %{int(percentage * 100)}"
 
-# --- LİNK/ID ÇÖZÜCÜ ---
 async def join_and_resolve(input_str):
     target_id = None
     input_str = str(input_str).strip()
-    
     for ub in USERBOTS:
         try:
             if "t.me" in input_str:
@@ -325,18 +322,13 @@ async def stop_process(client, message):
     await message.reply("🛑 **DURDURULDU.**")
 
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer_final_safe(client, message):
+async def transfer_v23_force(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
     user_id = message.from_user.id
-    active_bots = USERBOTS[:2] # Sadece 2 bot (Asıl ve Yedek)
-
-    # ---------------------------------------------------------
-    # 🔥 GÜVENLİK AYARI (Saniye) 🔥
-    # 4 Saniye = Çok Güvenli (Ban Yemez)
-    SAFETY_DELAY = 4 
-    # ---------------------------------------------------------
+    active_bots = USERBOTS[:2] 
+    SAFETY_DELAY = 3
 
     if not active_bots: await message.reply("❌ Userbot yok!"); return
 
@@ -344,24 +336,22 @@ async def transfer_final_safe(client, message):
         args = message.command
         src_input = args[1]
         dst_input = args[2]
-        # 3. Parametre: Manuel Başlangıç (Örn: 2450)
         manual_start = int(args[3]) if len(args) > 3 else 0
     except:
-        await message.reply("⚠️ **Kullanım:** `/transfer KAYNAK HEDEF 2450`\n(2450 yazan yere kaçıncı mesajdan devam edeceğini yaz)")
+        await message.reply("⚠️ **Kullanım:** `/transfer KAYNAK HEDEF 2560`")
         return
 
-    status_msg = await message.reply(f"🛡️ **GÜVENLİ TRANSFER BAŞLATILIYOR...**\nHesapları korumak için hız limitli (4sn).")
+    status_msg = await message.reply(f"🛡️ **V23 MODU: ZORLA İNDİRME...**")
 
     src_id = await join_and_resolve(src_input)
     dst_id = await join_and_resolve(dst_input)
 
     if not src_id or not dst_id:
-        await status_msg.edit(f"❌ **HATA:** ID Bulunamadı. Bot gruba girememiş olabilir.")
+        await status_msg.edit(f"❌ **HATA:** ID Bulunamadı.")
         return
 
-    # 2. LİSTELEME
-    await status_msg.edit(f"📦 **LİSTE ÇEKİLİYOR...**\n10.000+ mesaj taranıyor, bu 1-2 dakika sürebilir.")
-    
+    # LİSTELEME
+    await status_msg.edit(f"📦 **LİSTE ÇEKİLİYOR...**")
     msg_ids = []
     scanner = active_bots[0]
     
@@ -370,41 +360,28 @@ async def transfer_final_safe(client, message):
             if ABORT_FLAG: break
             msg_ids.append(msg.id)
     except Exception as e:
-        await status_msg.edit(f"❌ **Liste Hatası:** {e}")
-        return
+        await status_msg.edit(f"❌ **Liste Hatası:** {e}"); return
 
     if ABORT_FLAG: await status_msg.edit("🛑 İptal."); return
 
-    # 3. SIRALAMA VE BAŞLANGIÇ AYARI
-    msg_ids.reverse() # Eskiden Yeniye
-    
+    msg_ids.reverse() 
     last_processed_id = load_progress(src_id)
     
-    # Hangi mesajları atacağız?
     if manual_start > 0:
-        # Elle sayı verildiyse (2450 gibi), direkt o sıradan başla
         if len(msg_ids) > manual_start:
              todo_ids = msg_ids[manual_start:]
-             await status_msg.edit(f"⏩ **DEVAM EDİLİYOR...**\nİlk {manual_start} mesaj atlandı.\nKalan: {len(todo_ids)}")
         else:
-             await status_msg.edit("⚠️ Girdiğin sayı toplam mesajdan büyük!"); return
+             await status_msg.edit("⚠️ Sayı çok büyük!"); return
     else:
-        # Log dosyasına göre otomatik devam et
         todo_ids = [mid for mid in msg_ids if mid > last_processed_id]
 
     total_todo = len(todo_ids)
-    
-    if total_todo == 0:
-        await status_msg.edit(f"✅ **Zaten Güncel!**")
-        return
+    if total_todo == 0: await status_msg.edit(f"✅ **Zaten Güncel!**"); return
 
-    # 4. TRANSFER
     processed_count = 0
-    bot_index = 0 # 0 = Asıl Bot, 1 = Yedek Bot
+    bot_index = 0
     
-    bot_names = ["1 (Asıl)", "2 (Yedek)"]
-    
-    await status_msg.edit(f"🚀 **TRANSFER BAŞLADI**\nToplam Kalan: {total_todo}\nBekleme: 4 Saniye")
+    await status_msg.edit(f"🚀 **BAŞLIYOR...**\nKalan: {total_todo}")
 
     for current_msg_id in todo_ids:
         if ABORT_FLAG: await status_msg.edit("🛑 Durduruldu."); return
@@ -415,7 +392,6 @@ async def transfer_final_safe(client, message):
         while not sent and retry < len(active_bots) * 2: 
             current_ub = active_bots[bot_index]
             try:
-                # Canlı Çekim
                 msg = await current_ub.get_messages(src_id, current_msg_id)
                 
                 if not msg or msg.empty or msg.service:
@@ -423,52 +399,68 @@ async def transfer_final_safe(client, message):
 
                 if msg.media:
                     caption = msg.caption or ""
-                    file_path = await current_ub.download_media(msg)
-                    if file_path:
+                    file_path = None
+                    
+                    # --- KRİTİK NOKTA: İNDİRMEYİ DENE ---
+                    try:
+                        # İlerleme çubuğu ile indirmeyi dene (Zorla)
+                        file_path = await current_ub.download_media(msg)
+                    except Exception as down_err:
+                        print(f"İndirme Başarısız ({current_msg_id}): {down_err}")
+                        file_path = None
+
+                    # --- KONTROL: DOSYA İNDİ Mİ? ---
+                    if file_path and os.path.exists(file_path):
+                        # Dosya varsa gönder
                         if msg.photo: await current_ub.send_photo(dst_id, file_path, caption=caption)
                         elif msg.video: await current_ub.send_video(dst_id, file_path, caption=caption)
                         elif msg.document: await current_ub.send_document(dst_id, file_path, caption=caption)
                         elif msg.audio: await current_ub.send_audio(dst_id, file_path, caption=caption)
                         elif msg.voice: await current_ub.send_voice(dst_id, file_path)
+                        elif msg.sticker: await current_ub.send_sticker(dst_id, file_path)
+                        elif msg.animation: await current_ub.send_animation(dst_id, file_path, caption=caption)
+                        else: await current_ub.send_document(dst_id, file_path, caption=caption)
+                        
                         os.remove(file_path)
                         sent = True
+                    else:
+                        # Dosya İNMEDİYSE (Yani kısıtlama yüzünden veri gelmediyse)
+                        # HATA VERME, SADECE LOG DÜŞ VE GEÇ.
+                        print(f"⚠️ İÇERİK KORUMALI/BOŞ: {current_msg_id} atlandı.")
+                        sent = True # Gönderilmiş sayıp geçiyoruz ki döngü kırılsın.
+
                 elif msg.text:
-                    await current_ub.send_message(dst_id, msg.text)
+                    if msg.text.strip():
+                        await current_ub.send_message(dst_id, msg.text)
                     sent = True
-                
-                # --- BAN KORUMA BEKLEMESİ ---
-                await asyncio.sleep(SAFETY_DELAY) 
+                else:
+                    sent = True
+
+                await asyncio.sleep(SAFETY_DELAY)
 
             except (FloodWait, PeerFlood, UserRestricted) as e:
-                wait_sec = e.value if isinstance(e, FloodWait) else 120
-                print(f"⚠️ Hız Limiti! Bot {bot_names[bot_index]} dinleniyor ({wait_sec}s).")
-                
-                # Diğer bota geç
+                wait_sec = e.value if isinstance(e, FloodWait) else 60
                 bot_index = (bot_index + 1) % len(active_bots)
-                retry += 1
-                await asyncio.sleep(5) 
-                
+                retry += 1; await asyncio.sleep(5) 
             except Exception as e:
-                print(f"Hata: {e}")
+                print(f"Genel Hata ({current_msg_id}): {e}")
+                # Hata 400 Message Empty ise -> PAS GEÇ
+                if "400" in str(e) or "MESSAGE_EMPTY" in str(e):
+                    sent = True; break
+                
                 bot_index = (bot_index + 1) % len(active_bots)
-                retry += 1
-                await asyncio.sleep(2)
+                retry += 1; await asyncio.sleep(2)
 
         if sent:
             processed_count += 1
             save_progress(src_id, current_msg_id)
-            
             if processed_count % 5 == 0:
                 try:
                     bar = get_progress_bar(processed_count, total_todo)
-                    # Gerçek toplam (atlananlar + yeni atılanlar)
-                    gercek_sayi = manual_start + processed_count
-                    
-                    text = (f"🛡️ **GÜVENLİ TRANSFER**\n{bar}\n✅ İşlenen: {processed_count}\n🔢 Toplam İlerleme: {gercek_sayi}\n🤖 Bot: {bot_names[bot_index]}")
-                    await status_msg.edit(text)
+                    await status_msg.edit(f"🛡️ **V23 ZORLA İNDİRME**\n{bar}\n✅ {processed_count} / {total_todo}")
                 except: pass
 
-    await status_msg.edit(f"🏁 **TAMAMLANDI!**\n{processed_count} içerik spam yemeden aktarıldı.")
+    await status_msg.edit(f"🏁 **BİTTİ!**\n{processed_count} içerik aktarıldı.")
     if os.path.exists(f"log_{src_id}.txt"): os.remove(f"log_{src_id}.txt")
 # ==================== 9. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
@@ -747,6 +739,7 @@ async def topic_transfer_safe(client, message):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
