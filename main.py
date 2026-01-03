@@ -112,7 +112,6 @@ async def start(client, message):
         await message.reply("⛔ **Deneme Süreniz Doldu!**\nSınırsız erişim için iletişime geçin: @yasin33")
         return
     
-    # MÜŞTERİ DOSTU KARŞILAMA MESAJI
     txt = (
         f"👋 **Selam! Ben YaelSaver.**\n\n"
         f"🚀 **Ne İşe Yararım?**\n"
@@ -134,7 +133,6 @@ async def cb_handler(client, cb):
         txt = (f"👋 **YaelSaver Paneli**\n\n📊 Durum: {status}\n🚀 Hazırım, link gönderebilirsin.")
         await cb.message.edit_text(txt, reply_markup=main_menu(uid))
     
-    # --- KOMUTLAR BÖLÜMÜ ---
     elif data == "cmd_list":
         msg = (
             "📚 **Komut Listesi**\n\n"
@@ -142,13 +140,12 @@ async def cb_handler(client, cb):
             "Direkt mesaj linkini (`t.me/c/...`) atarsan indiririm.\n\n"
             "2️⃣ **Davet Linki:**\n"
             "Eğer 'Erişim Yok' dersem, grubun davet linkini (`t.me/+...`) at, ben girerim.\n\n"
-            "3️⃣ **Transfer (Sadece VIP):**\n"
-            "`/transfer KaynakID HedefID Limit`\n"
-            "Bir kanaldaki mesajları başka kanala kopyalar."
+            "3️⃣ **Zincir Transfer (Topic):**\n"
+            "`/zincir KaynakLink HedefLink`\n"
+            "Belirtilen mesajdan başlar, hedef topic'e aktarır."
         )
         await cb.message.edit_text(msg, reply_markup=back_btn())
 
-    # --- NASIL İNDİRİLİR ---
     elif data == "help_dl":
         msg = (
             "📥 **İçerik İndirme Rehberi**\n\n"
@@ -161,7 +158,7 @@ async def cb_handler(client, cb):
 
     elif data == "my_account": _, st = check_user_access(uid); await cb.message.edit_text(f"📊 **Hesap Bilgisi**\n\nID: `{uid}`\nPaket: {st}", reply_markup=back_btn())
     elif data == "vip_menu": await cb.message.edit_text("👑 **VIP & Transfer İşlemleri**", reply_markup=vip_menu())
-    elif data == "help_trans": await cb.message.edit_text("🔄 **Toplu Transfer**\n\nKomut: `/transfer -100xxx -100yyy 50`\n(KaynakID, HedefID, Adet)", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="vip_menu")]]))
+    elif data == "help_trans": await cb.message.edit_text("🔄 **Toplu Transfer**\n\nKomut: `/zincir Kaynak Hedef`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="vip_menu")]]))
     
     elif data == "admin_panel":
         if uid != OWNER_ID: await cb.answer("Yasak!", show_alert=True); return
@@ -169,7 +166,7 @@ async def cb_handler(client, cb):
     elif data == "how_add": await cb.message.edit_text("VIP Ekleme:\n`/addvip KULLANICI_ID`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_panel")]]))
     elif data == "how_del": await cb.message.edit_text("VIP Silme:\n`/delvip KULLANICI_ID`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_panel")]]))
 
-# ==================== 7. ÇİFT MOTORLU ZEKA (AYNI MANTIK) ====================
+# ==================== 7. YARDIMCI FONKSİYONLAR ====================
 
 async def force_scan_all_bots(target_id):
     for ub in USERBOTS:
@@ -192,7 +189,9 @@ async def try_join_all(link):
         except: continue
     return False, None
 
-@bot.on_message(filters.regex(r"t\.me/") & filters.private)
+# ==================== 8. TEKLİ İNDİRME (DÜZELTİLDİ: KOMUTLARA KARIŞMAZ) ====================
+# BURASI ÇOK ÖNEMLİ: ~filters.regex(r"^/") sayesinde komutlara atlamaz!
+@bot.on_message(filters.regex(r"t\.me/") & ~filters.regex(r"^/") & filters.private)
 async def link_handler(client, message):
     user_id = message.from_user.id
     access, status = check_user_access(user_id)
@@ -269,7 +268,10 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== ZİNCİRLEME TRANSFER (V36 - ÇAKIŞMA FİXLİ) ====================
+
+# ==================== 9. ZİNCİRLEME TRANSFER (Topic Destekli) ====================
+ABORT_FLAG = False
+
 @bot.on_message(filters.command("zincir") & filters.private)
 async def chain_transfer_final(client, message):
     global ABORT_FLAG
@@ -360,6 +362,8 @@ async def chain_transfer_final(client, message):
                         elif msg.document: await ub.send_document(dst["id"], path, caption=caption, **args)
                         elif msg.audio: await ub.send_audio(dst["id"], path, caption=caption, **args)
                         elif msg.voice: await ub.send_voice(dst["id"], path, **args)
+                        elif msg.sticker: await ub.send_sticker(dst["id"], path, **args)
+                        elif msg.animation: await ub.send_animation(dst["id"], path, caption=caption, **args)
                         
                         os.remove(path)
                         count += 1
@@ -381,12 +385,20 @@ async def chain_transfer_final(client, message):
         except: pass
 
     await status.edit(f"🏁 **TAMAMLANDI!**\n{count} mesaj aktarıldı.")
-# ==================== 9. ADMİN ====================
+
+@bot.on_message(filters.command("iptal") & filters.private)
+async def stop_process(client, message):
+    global ABORT_FLAG
+    ABORT_FLAG = True
+    await message.reply("🛑 **DURDURULDU.**")
+
+# ==================== 10. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
 @bot.on_message(filters.command("delvip") & filters.user(OWNER_ID))
 async def delvip(c, m): set_vip(int(m.command[1]), False); await m.reply("❌")
-# ==================== 10. BAŞLATMA ====================
+
+# ==================== 11. BAŞLATMA ====================
 async def main():
     print("Sistem Başlatılıyor...")
     keep_alive()
@@ -400,36 +412,6 @@ async def main():
         try: await ub.stop()
         except: pass
 
-    if os.path.exists(f"log_{src_id}_{src_topic_id}.txt"): os.remove(f"log_{src_id}_{src_topic_id}.txt")
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
