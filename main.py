@@ -715,10 +715,10 @@ async def main():
     for ub in USERBOTS:
         try: await ub.stop()
         except: pass
-# ==================== 9. TOPIC TRANSFER (V25 - ESKİ SÜRÜM UYUMLU / MANUEL FİLTRE) ====================
+# ==================== 9. TOPIC TRANSFER (V26 - HİBRİT / GRUPTAN TOPICE + BAŞLANGIÇ AYARLI) ====================
 
 @bot.on_message(filters.command("topictransfer") & filters.private)
-async def topic_transfer_legacy_fix(client, message):
+async def topic_transfer_hybrid(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
@@ -727,43 +727,47 @@ async def topic_transfer_legacy_fix(client, message):
     SAFETY_DELAY = 3 
 
     try:
-        # /topictransfer KAYNAK_GRUP KAYNAK_TOPIC HEDEF_GRUP HEDEF_TOPIC 0
+        # KOMUT: /topictransfer KAYNAK_GRUP KAYNAK_TOPIC HEDEF_GRUP HEDEF_TOPIC BASLANGIC_SAYISI
         args = message.command
         src_grp = int(args[1])
-        src_topic = int(args[2])
+        src_topic = int(args[2]) # Buraya 0 yazarsan "Normal Grup" sayar
         dst_grp = int(args[3])
         dst_topic = int(args[4])
         manual_start = int(args[5]) if len(args) > 5 else 0
     except:
-        await message.reply("⚠️ Kullanım: `/topictransfer KAYNAK_GRUP KAYNAK_TOPIC HEDEF_GRUP HEDEF_TOPIC 0`")
+        await message.reply(
+            "⚠️ **Kullanım:**\n"
+            "`/topictransfer [KAYNAK_GRUP] [KAYNAK_TOPIC] [HEDEF_GRUP] [HEDEF_TOPIC] [BASLANGIC]`\n\n"
+            "💡 **İPUCU:** Kaynak normal grupsa 'KAYNAK_TOPIC' yerine **0** yaz."
+        )
         return
 
-    status_msg = await message.reply(f"🛡️ **ESKİ MOTOR İLE TOPIC MODU...**\n`message_thread_id` komutu kaldırıldı.\nTüm grup taranıp ayıklanıyor (Biraz sürebilir)...")
+    # Bilgilendirme
+    kaynak_isim = f"Konu: {src_topic}" if src_topic != 0 else "Normal Grup (Hepsi)"
+    status_msg = await message.reply(f"🛡️ **TRANSFER BAŞLIYOR...**\n📤 Kaynak: {kaynak_isim}\n📥 Hedef Konu: {dst_topic}\n📍 Başlangıç: {manual_start}")
 
     msg_ids = []
     scanner = active_bots[0]
     
     try:
-        # --- BURASI DEĞİŞTİ: Parametresiz Çekim ---
-        # Hata veren 'message_thread_id'yi sildik. Artık tüm grubu çekiyoruz.
+        # Tüm grubu çekiyoruz (Eski motor uyumu için)
         async for msg in scanner.get_chat_history(src_grp):
             if ABORT_FLAG: break
             
-            # --- MANUEL FİLTRELEME (AMELİYAT) ---
-            # Bu mesaj bizim istediğimiz topic'e mi ait?
-            # Eski sürümlerde Topic ID, 'reply_to_message_id' olarak görünebilir.
-            
             is_target = False
             
-            # 1. Yeni sürüm özelliği var mı?
-            if getattr(msg, "message_thread_id", None) == src_topic:
+            # --- FİLTRELEME MANTIĞI ---
+            if src_topic == 0:
+                # EĞER 0 YAZILDIYSA: Konu ayrımı yapma, hepsini al (Normal Grup Modu)
                 is_target = True
-            # 2. Eski sürüm mantığı (Reply ID = Topic ID)
-            elif getattr(msg, "reply_to_message_id", None) == src_topic:
-                is_target = True
-            # 3. Eğer mesaj servis mesajıysa ve ID'si Topic ID ise (Topic created message)
-            elif msg.id == src_topic:
-                is_target = True
+            else:
+                # EĞER KONU ID YAZILDIYSA: Sadece o konuyu al
+                if getattr(msg, "message_thread_id", None) == src_topic:
+                    is_target = True
+                elif getattr(msg, "reply_to_message_id", None) == src_topic:
+                    is_target = True
+                elif msg.id == src_topic:
+                    is_target = True
 
             if is_target:
                 msg_ids.append(msg.id)
@@ -774,24 +778,23 @@ async def topic_transfer_legacy_fix(client, message):
 
     if ABORT_FLAG: await status_msg.edit("🛑 İptal."); return
 
-    # Buradan sonrası standart V10/V22 mantığı
-    msg_ids.reverse()
+    msg_ids.reverse() # Eskiden Yeniye Çevir
     
+    # Başlangıç Noktası (Senin istediğin özellik)
     if manual_start > 0:
+        # ID'si manuel_start'tan büyük veya eşit olanları al
         todo_ids = [mid for mid in msg_ids if mid >= manual_start]
     else:
         todo_ids = msg_ids
 
     total_todo = len(todo_ids)
     if total_todo == 0: 
-        await status_msg.edit(f"✅ **Bu konuda mesaj bulunamadı!**\n(Belki konu ID yanlıştır veya Userbot konuyu göremiyordur)")
-        return
+        await status_msg.edit(f"✅ **İçerik Bulunamadı!**\n(ID'leri veya başlangıç sayısını kontrol et)"); return
 
     processed_count = 0
     bot_index = 0
-    bot_names = ["1 (Asıl)", "2 (Yedek)"]
     
-    await status_msg.edit(f"🚀 **BAŞLADI**\nBulunan: {total_todo} mesaj\nMod: Manuel Filtre")
+    await status_msg.edit(f"🚀 **BAŞLADI**\nAtılacak: {total_todo} Mesaj")
 
     for current_msg_id in todo_ids:
         if ABORT_FLAG: await status_msg.edit("🛑 Durduruldu."); return
@@ -802,12 +805,13 @@ async def topic_transfer_legacy_fix(client, message):
         while not sent and retry < len(active_bots) * 2:
             current_ub = active_bots[bot_index]
             try:
+                # Mesajı Çek
                 msg = await current_ub.get_messages(src_grp, current_msg_id)
+                
+                # Boş kontrolü
                 if not msg or msg.empty or msg.service: sent = True; break
 
-                # --- HEDEF TOPIC İÇİN ESKİ YÖNTEM ---
-                # Eski sürümlerde 'message_thread_id' parametresi send_message'da olmayabilir.
-                # Bu yüzden 'reply_to_message_id' kullanıyoruz. Bu her sürümde çalışır.
+                # HEDEF TOPIC AYARI (Eski sürüm uyumlu 'reply_to')
                 send_args = {"reply_to_message_id": dst_topic}
 
                 if msg.media:
@@ -822,7 +826,6 @@ async def topic_transfer_legacy_fix(client, message):
                         elif msg.audio: await current_ub.send_audio(dst_grp, file_path, caption=caption, **send_args)
                         elif msg.voice: await current_ub.send_voice(dst_grp, file_path, **send_args)
                         elif msg.sticker: await current_ub.send_sticker(dst_grp, file_path, **send_args)
-                        elif msg.animation: await current_ub.send_animation(dst_grp, file_path, caption=caption, **send_args)
                         
                         os.remove(file_path); sent = True
                     else: sent = True
@@ -835,26 +838,15 @@ async def topic_transfer_legacy_fix(client, message):
 
             except (FloodWait, PeerFlood) as e:
                 wait = e.value if isinstance(e, FloodWait) else 60
-                print(f"Limit: {wait}s")
                 bot_index = (bot_index + 1) % len(active_bots)
                 retry += 1; await asyncio.sleep(5)
             except Exception as e:
-                # "unexpected keyword" hatası alırsan buraya düşer
-                if "unexpected keyword" in str(e):
-                    print("⚠️ Eski sürüm 'reply_to'yu da yemedi, düz atıyorum...")
-                    try:
-                        # En kötü ihtimal: Topic'e değil normale at
-                        if msg.text: await current_ub.send_message(dst_grp, msg.text)
-                        sent = True
-                    except: sent = True
-                else:
-                    sent = True
-                break
+                sent = True; break # Hata verirse atla
         
         if sent:
             processed_count += 1
             if processed_count % 5 == 0:
-                try: await status_msg.edit(f"🛡️ **TOPIC AKTARIM**\n✅ {processed_count} / {total_todo}")
+                try: await status_msg.edit(f"🛡️ **TRANSFER**\n✅ {processed_count} / {total_todo}")
                 except: pass
 
     await status_msg.edit("🏁 **BİTTİ!**")
@@ -862,6 +854,7 @@ async def topic_transfer_legacy_fix(client, message):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
