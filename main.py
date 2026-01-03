@@ -269,18 +269,9 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== V34 - ZİNCİRLEME TRANSFER (ASLA DURMAZ) ====================
-import os
-import asyncio
-from pyrogram import Client, filters
-from pyrogram.errors import FloodWait
-
-# --- GLOBAL AYARLAR ---
-ABORT_FLAG = False
-SAFETY_DELAY = 3 
-
+# ==================== ZİNCİRLEME TRANSFER (V36 - ÇAKIŞMA FİXLİ) ====================
 @bot.on_message(filters.command("zincir") & filters.private)
-async def chain_transfer(client, message):
+async def chain_transfer_final(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
@@ -292,12 +283,12 @@ async def chain_transfer(client, message):
         src_link = message.command[1]
         dst_link = message.command[2]
     except:
-        await message.reply("⚠️ **KULLANIM:** `/zincir [KAYNAK_BASLANGIC_LINKI] [HEDEF_TOPIC_LINKI]`")
+        await message.reply("⚠️ **KULLANIM:** `/zincir [KAYNAK_LINK] [HEDEF_LINK]`")
         return
 
-    status = await message.reply("⚙️ **LİSTE HAZIRLANIYOR...**\n(Tek tek atıp durmaması için tüm listeyi çekiyorum...)")
+    status = await message.reply("⚙️ **ZİNCİR BAŞLATILIYOR...**")
 
-    # --- 1. LİNK ÇÖZÜCÜ ---
+    # LİNK ÇÖZÜCÜ
     def resolve(link):
         data = {"id": None, "topic": None, "msg": 0}
         link = str(link).strip()
@@ -305,10 +296,10 @@ async def chain_transfer(client, message):
             if "c/" in link:
                 clean = link.split("c/")[1].split("?")[0].split("/")
                 data["id"] = int("-100" + clean[0])
-                if len(clean) == 3: # Topicli
+                if len(clean) == 3: # Topicli: grup/topic/msg
                     data["topic"] = int(clean[1])
                     data["msg"] = int(clean[2])
-                elif len(clean) == 2: # Topicsiz
+                elif len(clean) == 2: # Topicsiz: grup/msg
                     data["msg"] = int(clean[1])
             elif "-100" in link:
                 data["id"] = int(link)
@@ -318,24 +309,18 @@ async def chain_transfer(client, message):
     src = resolve(src_link)
     dst = resolve(dst_link)
 
-    if not src or not dst:
-        await status.edit("❌ **LİNK HATASI.**"); return
+    if not src or not dst: await status.edit("❌ Link Hatalı"); return
 
-    # --- 2. LİSTELEME (BÜTÜN GEÇMİŞİ ÇEK) ---
+    # LİSTELEME
+    await status.edit("📦 **LİSTE HAZIRLANIYOR...**")
     msg_ids = []
     
-    # Kaynak gruptaki TÜM mesajları çekip filtreleyeceğiz
-    # Limit koymuyorum, hepsini tarasın.
     try:
         async for m in ub.get_chat_history(src["id"]):
             if ABORT_FLAG: break
+            if m.id < src["msg"]: continue # Eskileri atla
             
-            # Eğer mesajın ID'si, senin verdiğin başlangıçtan küçükse (eskisye)
-            # Döngüyü kırma, sadece alma. (Çünkü Telegram karışık verebilir)
-            if m.id < src["msg"]: 
-                continue
-
-            # Kaynak Topic Filtresi (Varsa)
+            # Kaynak Topic Filtresi
             if src["topic"]:
                 try:
                     tid = getattr(m, "message_thread_id", None) or getattr(m, "reply_to_message_id", None)
@@ -344,89 +329,58 @@ async def chain_transfer(client, message):
             
             msg_ids.append(m.id)
     except Exception as e:
-        await status.edit(f"❌ **LİSTE HATASI:** {e}")
-        return
+        await status.edit(f"❌ Erişim Hatası: {e}"); return
 
-    # Eskiden Yeniye Sırala
-    msg_ids.reverse()
-    
-    # Manuel olarak başlangıçtan öncekileri temizle (Garanti olsun)
-    final_list = [mid for mid in msg_ids if mid >= src["msg"]]
-    total = len(final_list)
+    msg_ids.reverse() # Eskiden yeniye
+    total = len(msg_ids)
+    if total == 0: await status.edit("❌ Mesaj bulunamadı."); return
 
-    if total == 0: await status.edit("❌ **MESAJ BULUNAMADI.**"); return
+    await status.edit(f"🚀 **BAŞLADI**\nToplam: {total} Mesaj")
 
-    await status.edit(f"🚀 **TRANSFER BAŞLADI**\nToplam: {total} Mesaj\nDurmadan aktaracak...")
-
-    # --- 3. AKTARIM DÖNGÜSÜ ---
+    # AKTARIM
     count = 0
-    fail = 0
-
-    for msg_id in final_list:
+    for msg_id in msg_ids:
         if ABORT_FLAG: await status.edit("🛑 Durduruldu."); return
-        
         try:
-            # Mesajı Çek
             msg = await ub.get_messages(src["id"], msg_id)
-            if not msg or msg.empty or msg.service: continue
+            if not msg or msg.empty: continue
 
-            # Hedef Topic Ayarı
-            send_args = {}
-            if dst["topic"]: send_args["reply_to_message_id"] = dst["topic"]
+            # HEDEF TOPIC AYARI
+            args = {}
+            if dst["topic"]: args["reply_to_message_id"] = dst["topic"]
 
-            # --- GÖNDERME İŞLEMİ ---
-            success = False
-            
+            # İNDİR VE GÖNDER
             if msg.media:
-                file_path = None
                 try:
-                    file_path = await ub.download_media(msg)
-                except: pass # İndiremezse pas geç
-
-                if file_path:
-                    try:
+                    path = await ub.download_media(msg)
+                    if path:
                         caption = msg.caption or ""
-                        if msg.photo: await ub.send_photo(dst["id"], file_path, caption=caption, **send_args)
-                        elif msg.video: await ub.send_video(dst["id"], file_path, caption=caption, **send_args)
-                        elif msg.document: await ub.send_document(dst["id"], file_path, caption=caption, **send_args)
-                        elif msg.audio: await ub.send_audio(dst["id"], file_path, caption=caption, **send_args)
-                        elif msg.voice: await ub.send_voice(dst["id"], file_path, **send_args)
-                        elif msg.sticker: await ub.send_sticker(dst["id"], file_path, **send_args)
-                        elif msg.animation: await ub.send_animation(dst["id"], file_path, caption=caption, **send_args)
-                        success = True
-                    except Exception as e:
-                        print(f"Gönderim Hatası ({msg_id}): {e}")
-                    finally:
-                        if os.path.exists(file_path): os.remove(file_path)
+                        if msg.photo: await ub.send_photo(dst["id"], path, caption=caption, **args)
+                        elif msg.video: await ub.send_video(dst["id"], path, caption=caption, **args)
+                        elif msg.document: await ub.send_document(dst["id"], path, caption=caption, **args)
+                        elif msg.audio: await ub.send_audio(dst["id"], path, caption=caption, **args)
+                        elif msg.voice: await ub.send_voice(dst["id"], path, **args)
+                        
+                        os.remove(path)
+                        count += 1
+                except: pass
             
-            elif msg.text:
-                if msg.text.strip():
-                    try:
-                        await ub.send_message(dst["id"], msg.text, **send_args)
-                        success = True
-                    except: pass
-
-            if success: 
-                count += 1
-            else:
-                fail += 1
-
-            # Bekleme (Ban yememek için şart)
-            await asyncio.sleep(SAFETY_DELAY)
-
+            elif msg.text and msg.text.strip():
+                try:
+                    await ub.send_message(dst["id"], msg.text, **args)
+                    count += 1
+                except: pass
+            
+            await asyncio.sleep(3) # Ban koruması
+            
             if count % 5 == 0:
-                try: await status.edit(f"🔄 **ZİNCİRLEME AKTARIM**\n✅ {count} / {total}")
+                try: await status.edit(f"🔄 **AKTARILIYOR...**\n✅ {count} / {total}")
                 except: pass
 
-        except FloodWait as e:
-            await asyncio.sleep(e.value + 5)
-        except Exception as e:
-            # KRİTİK NOKTA: Hata olsa bile DURMA, devam et.
-            print(f"Genel Hata ({msg_id}): {e}")
-            fail += 1
-            continue 
+        except FloodWait as e: await asyncio.sleep(e.value + 5)
+        except: pass
 
-    await status.edit(f"🏁 **BİTTİ!**\n✅ Başarılı: {count}\n❌ Atlanan: {fail}")
+    await status.edit(f"🏁 **TAMAMLANDI!**\n{count} mesaj aktarıldı.")
 # ==================== 9. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
@@ -450,6 +404,7 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
