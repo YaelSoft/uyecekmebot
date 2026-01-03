@@ -715,10 +715,10 @@ async def main():
     for ub in USERBOTS:
         try: await ub.stop()
         except: pass
-# ==================== 9. TOPIC TRANSFER (V26 - HİBRİT / GRUPTAN TOPICE + BAŞLANGIÇ AYARLI) ====================
+# ==================== 9. TOPIC TRANSFER (V27 - MANUEL & BASİT) ====================
 
 @bot.on_message(filters.command("topictransfer") & filters.private)
-async def topic_transfer_hybrid(client, message):
+async def topic_transfer_simple(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
@@ -727,91 +727,84 @@ async def topic_transfer_hybrid(client, message):
     SAFETY_DELAY = 3 
 
     try:
-        # KOMUT: /topictransfer KAYNAK_GRUP KAYNAK_TOPIC HEDEF_GRUP HEDEF_TOPIC BASLANGIC_SAYISI
+        # KOMUT: /topictransfer [KAYNAK_GRUP] [KAYNAK_KONU] [HEDEF_GRUP] [HEDEF_KONU] [BASLANGIC_NO]
         args = message.command
         src_grp = int(args[1])
-        src_topic = int(args[2]) # Buraya 0 yazarsan "Normal Grup" sayar
+        src_topic = int(args[2]) # Normal grup ise 0 yaz
         dst_grp = int(args[3])
         dst_topic = int(args[4])
-        manual_start = int(args[5]) if len(args) > 5 else 0
+        start_id = int(args[5])  # Kaçıncı mesajdan başlasın?
     except:
         await message.reply(
-            "⚠️ **Kullanım:**\n"
-            "`/topictransfer [KAYNAK_GRUP] [KAYNAK_TOPIC] [HEDEF_GRUP] [HEDEF_TOPIC] [BASLANGIC]`\n\n"
-            "💡 **İPUCU:** Kaynak normal grupsa 'KAYNAK_TOPIC' yerine **0** yaz."
+            "⚠️ **KULLANIM:**\n"
+            "`/topictransfer -100Kaynak 0 -100Hedef 44 24558`\n\n"
+            "Anlamı: Kaynak(Normal)'tan al, Hedef(44.Konu)'e at, 24558'den başla."
         )
         return
 
-    # Bilgilendirme
-    kaynak_isim = f"Konu: {src_topic}" if src_topic != 0 else "Normal Grup (Hepsi)"
-    status_msg = await message.reply(f"🛡️ **TRANSFER BAŞLIYOR...**\n📤 Kaynak: {kaynak_isim}\n📥 Hedef Konu: {dst_topic}\n📍 Başlangıç: {manual_start}")
+    # Bilgilendirme Mesajı
+    kaynak_ad = "Normal Grup" if src_topic == 0 else f"Konu: {src_topic}"
+    status_msg = await message.reply(
+        f"🚀 **İŞLEM BAŞLIYOR...**\n"
+        f"📤 Kaynak: {kaynak_ad}\n"
+        f"📥 Hedef Konu: {dst_topic}\n"
+        f"📍 Başlangıç: {start_id}. mesaj"
+    )
 
     msg_ids = []
     scanner = active_bots[0]
     
     try:
-        # Tüm grubu çekiyoruz (Eski motor uyumu için)
+        # Tüm grubu çek (En garantisi budur)
         async for msg in scanner.get_chat_history(src_grp):
             if ABORT_FLAG: break
             
-            is_target = False
-            
-            # --- FİLTRELEME MANTIĞI ---
-            if src_topic == 0:
-                # EĞER 0 YAZILDIYSA: Konu ayrımı yapma, hepsini al (Normal Grup Modu)
-                is_target = True
-            else:
-                # EĞER KONU ID YAZILDIYSA: Sadece o konuyu al
-                if getattr(msg, "message_thread_id", None) == src_topic:
-                    is_target = True
-                elif getattr(msg, "reply_to_message_id", None) == src_topic:
-                    is_target = True
-                elif msg.id == src_topic:
-                    is_target = True
+            # --- 1. KONU FİLTRESİ ---
+            # Eğer kaynak topic 0 ise (Normal Grup), hepsini al.
+            # Değilse, sadece o topic'e ait olanları al.
+            if src_topic != 0:
+                # Eski/Yeni sürüm uyumlu kontrol
+                current = getattr(msg, "message_thread_id", None) or getattr(msg, "reply_to_message_id", None)
+                if current != src_topic and msg.id != src_topic:
+                    continue # Bu mesaj bizim konudan değil, geç.
 
-            if is_target:
-                msg_ids.append(msg.id)
+            # --- 2. BAŞLANGIÇ ID FİLTRESİ ---
+            # Eğer mesajın numarası, senin istediğin başlangıçtan küçükse ALMA.
+            if msg.id < start_id:
+                continue # Bu mesaj eski, geç.
+
+            # Filtreleri geçtiyse listeye ekle
+            msg_ids.append(msg.id)
 
     except Exception as e:
-        await status_msg.edit(f"❌ **Tarama Hatası:** {e}")
+        await status_msg.edit(f"❌ **Hata:** {e}")
         return
 
     if ABORT_FLAG: await status_msg.edit("🛑 İptal."); return
 
-    msg_ids.reverse() # Eskiden Yeniye Çevir
+    msg_ids.reverse() # Eskiden Yeniye Sırala
+    total_todo = len(msg_ids)
     
-    # Başlangıç Noktası (Senin istediğin özellik)
-    if manual_start > 0:
-        # ID'si manuel_start'tan büyük veya eşit olanları al
-        todo_ids = [mid for mid in msg_ids if mid >= manual_start]
-    else:
-        todo_ids = msg_ids
-
-    total_todo = len(todo_ids)
     if total_todo == 0: 
-        await status_msg.edit(f"✅ **İçerik Bulunamadı!**\n(ID'leri veya başlangıç sayısını kontrol et)"); return
+        await status_msg.edit(f"✅ **İçerik Bulunamadı!**\n(Verdiğin sayıdan sonra mesaj atılmamış olabilir)"); return
 
     processed_count = 0
     bot_index = 0
     
-    await status_msg.edit(f"🚀 **BAŞLADI**\nAtılacak: {total_todo} Mesaj")
+    await status_msg.edit(f"🚀 **AKTARIM BAŞLADI**\nAdet: {total_todo}")
 
-    for current_msg_id in todo_ids:
+    for current_msg_id in msg_ids:
         if ABORT_FLAG: await status_msg.edit("🛑 Durduruldu."); return
-        
         sent = False
         retry = 0
         
         while not sent and retry < len(active_bots) * 2:
             current_ub = active_bots[bot_index]
             try:
-                # Mesajı Çek
                 msg = await current_ub.get_messages(src_grp, current_msg_id)
-                
-                # Boş kontrolü
                 if not msg or msg.empty or msg.service: sent = True; break
 
-                # HEDEF TOPIC AYARI (Eski sürüm uyumlu 'reply_to')
+                # HEDEFE ATARKEN KONU SEÇİMİ (Reply Yöntemi - En Sağlamı)
                 send_args = {"reply_to_message_id": dst_topic}
 
                 if msg.media:
@@ -841,11 +834,11 @@ async def topic_transfer_hybrid(client, message):
                 bot_index = (bot_index + 1) % len(active_bots)
                 retry += 1; await asyncio.sleep(5)
             except Exception as e:
-                sent = True; break # Hata verirse atla
+                sent = True; break
         
         if sent:
             processed_count += 1
-            if processed_count % 5 == 0:
+            if processed_count % 10 == 0:
                 try: await status_msg.edit(f"🛡️ **TRANSFER**\n✅ {processed_count} / {total_todo}")
                 except: pass
 
@@ -854,6 +847,7 @@ async def topic_transfer_hybrid(client, message):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
