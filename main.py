@@ -269,7 +269,7 @@ async def link_handler(client, message):
         )
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
-# ==================== 8. TRANSFER (V15 - FULL LINK OTOMASYON + TOPIC DESTEK) ====================
+# ==================== 8. TRANSFER (V16 - TOPIC FIX + LINK PARÇALAYICI) ====================
 import time
 import asyncio
 import os
@@ -293,43 +293,51 @@ def get_progress_bar(current, total):
     bar = "▓" * finished_length + "░" * (10 - finished_length)
     return f"[{bar}] %{int(percentage * 100)}"
 
-# --- SİHİRLİ LİNK ÇÖZÜCÜ (TOPIC + MSG ID + GROUP ID) ---
+# --- GELİŞMİŞ LINK ANALİZ (HATASIZ) ---
 async def analyze_link(input_str, ub):
     data = {
         "chat_id": None,
-        "topic_id": None,
-        "msg_id": 0 # Başlangıç mesajı
+        "topic_id": None, # Topic ID (Varsa)
+        "msg_id": 0       # Mesaj ID
     }
     
     input_str = str(input_str).strip()
     
-    # 1. Eğer Sadece ID ise (-100xxxx)
-    if input_str.startswith("-100") or (input_str.isdigit() and len(input_str) > 5):
+    # 1. Eğer ID verildiyse (-100xxxx)
+    if input_str.startswith("-100"):
         data["chat_id"] = int(input_str)
         return data
 
-    # 2. Eğer Link ise
+    # 2. Link Analizi
     if "t.me/" in input_str:
         try:
-            # Gruba katılmayı/görmeyi dene
+            # Önce gruba erişim (Join/Get)
             if "+" in input_str or "joinchat" in input_str:
                 try: chat = await ub.join_chat(input_str)
                 except: chat = await ub.get_chat(input_str)
                 data["chat_id"] = chat.id
             
-            elif "c/" in input_str: # Örn: t.me/c/112233/55/999 (Grup/Topic/Msg)
-                # Linki parçala
+            elif "c/" in input_str: 
+                # FORMAT: t.me/c/GRUP_ID/TOPIC_ID/MSG_ID
                 parts = input_str.split("c/")[1].split("/")
-                # parts[0] = Grup ID (tiresiz)
+                
+                # Grup ID'yi al
                 data["chat_id"] = int("-100" + parts[0])
                 
-                if len(parts) == 3: # Topicli Link (Grup/Topic/Msg)
+                # Şimdi parçalara bakalım
+                if len(parts) == 3: 
+                    # Bu bir TOPIC Linkidir (Grup / Topic / Msg)
                     data["topic_id"] = int(parts[1])
                     data["msg_id"] = int(parts[2])
-                elif len(parts) == 2: # Normal Link (Grup/Msg)
+                elif len(parts) == 2: 
+                    # Bu Normal Linktir (Grup / Msg)
+                    # AMA DİKKAT: Kullanıcı Topic linkini (t.me/c/xx/TOPIC_ID) attıysa
+                    # ve mesaj ID yoksa, o son sayıyı mesaj ID sanabiliriz.
+                    # O yüzden her zaman "Mesaj Linki" istiyoruz.
                     data["msg_id"] = int(parts[1])
             
-            else: # Örn: t.me/kullaniciadi/99
+            else: 
+                # Genel Link: t.me/username/99
                 parts = input_str.split("t.me/")[1].split("/")
                 username = parts[0]
                 chat = await ub.join_chat(username)
@@ -338,7 +346,7 @@ async def analyze_link(input_str, ub):
                     data["msg_id"] = int(parts[1])
                     
         except Exception as e:
-            print(f"Link analiz hatası: {e}")
+            print(f"Link Parse Hatası: {e}")
 
     return data
 
@@ -349,13 +357,13 @@ async def stop_process(client, message):
     await message.reply("🛑 **DURDURULDU.**")
 
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer_ultimate(client, message):
+async def transfer_topic_fix(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
     user_id = message.from_user.id
     active_bots = USERBOTS[:2]
-    SAFETY_DELAY = 3 # Güvenli Hız
+    SAFETY_DELAY = 3 
 
     if not active_bots: await message.reply("❌ Userbot yok!"); return
 
@@ -365,66 +373,58 @@ async def transfer_ultimate(client, message):
         src_input = args[1]
         dst_input = args[2]
     except:
-        await message.reply(
-            "⚠️ **Kullanım:**\n"
-            "`/transfer [KAYNAK_MESAJ_LINKI] [HEDEF_TOPIC_LINKI]`\n\n"
-            "💡 **İpucu:**\n"
-            "Kaynak gruptaki başlamak istediğin mesajın linkini ve\n"
-            "Hedef gruptaki atmak istediğin Topic'in linkini yapıştır."
-        )
+        await message.reply("⚠️ **Kullanım:** `/transfer [KAYNAK_MESAJ_LINKI] [HEDEF_MESAJ_LINKI]`")
         return
 
-    status_msg = await message.reply(f"🔍 **LİNKLER ANALİZ EDİLİYOR...**")
+    status_msg = await message.reply(f"🔍 **TOPIC ANALİZİ YAPILIYOR...**")
 
-    # Analiz için 1. botu kullan
     scanner = active_bots[0]
     
-    # Kaynak ve Hedef verilerini çöz
+    # Linkleri Çöz
     src_data = await analyze_link(src_input, scanner)
     dst_data = await analyze_link(dst_input, scanner)
 
     if not src_data["chat_id"] or not dst_data["chat_id"]:
-        await status_msg.edit(f"❌ **HATA:** Gruplara erişilemedi. Botların grupta olduğundan emin ol.")
+        await status_msg.edit(f"❌ **HATA:** Grup ID'leri bulunamadı. Linkler doğru mu?")
         return
 
-    # Özet Bilgi Mesajı
+    # Bilgilendirme
     info_text = (
-        f"✅ **AYARLAR TAMAM!**\n\n"
-        f"📤 **Kaynak:** `{src_data['chat_id']}`\n"
-        f"📂 **Kaynak Topic:** {src_data['topic_id'] if src_data['topic_id'] else 'Yok (Genel)'}\n"
-        f"📍 **Başlangıç Mesajı:** {src_data['msg_id']}\n\n"
-        f"📥 **Hedef:** `{dst_data['chat_id']}`\n"
-        f"📂 **Hedef Topic:** {dst_data['topic_id'] if dst_data['topic_id'] else 'Yok (Genel)'}\n"
+        f"✅ **HEDEF KİLİTLENDİ!**\n\n"
+        f"📤 **Kaynak Grup:** `{src_data['chat_id']}`\n"
+        f"📂 **Kaynak Topic:** `{src_data['topic_id'] if src_data['topic_id'] else 'GENEL'}`\n"
+        f"📍 **Başlangıç:** `{src_data['msg_id']}`. mesaj\n\n"
+        f"📥 **Hedef Grup:** `{dst_data['chat_id']}`\n"
+        f"📂 **Hedef Topic:** `{dst_data['topic_id'] if dst_data['topic_id'] else 'GENEL'}`"
     )
-    await status_msg.edit(info_text + "\n📦 **Liste Çekiliyor...**")
+    await status_msg.edit(info_text + "\n\n📦 **Liste Çekiliyor...**")
 
     # 2. LİSTELEME
     msg_ids = []
     try:
-        # Topic varsa sadece o topic'i çek, yoksa genel
-        chat_args = {}
+        # KAYNAK TOPIC VARSA ONU BELİRT (ÇOK ÖNEMLİ!)
+        history_args = {}
         if src_data["topic_id"]:
-            chat_args["message_thread_id"] = src_data["topic_id"]
+            history_args["message_thread_id"] = src_data["topic_id"]
 
-        async for msg in scanner.get_chat_history(src_data["chat_id"], **chat_args):
+        async for msg in scanner.get_chat_history(src_data["chat_id"], **history_args):
             if ABORT_FLAG: break
             msg_ids.append(msg.id)
     except Exception as e:
-        await status_msg.edit(f"❌ **Liste Hatası:** {e}\nEğer grup 'Topic'li ise ve Topic ID bulamadıysam hata verir.")
+        await status_msg.edit(f"❌ **Liste Çekilemedi:** {e}\nTopic ID hatalı olabilir.")
         return
 
     if ABORT_FLAG: await status_msg.edit("🛑 İptal."); return
 
-    # 3. SIRALAMA VE BAŞLANGIÇ NOKTASI
+    # 3. SIRALAMA
     msg_ids.reverse() # Eskiden Yeniye
     
     start_point = src_data["msg_id"]
     last_processed = load_progress(src_data["chat_id"])
     
-    # Eğer linkte mesaj ID varsa oradan başla, yoksa logdan devam et
+    # Eğer linkte mesaj ID varsa oradan başla
     if start_point > 0:
         todo_ids = [mid for mid in msg_ids if mid >= start_point]
-        await status_msg.edit(f"⏩ **BAŞLANGIÇ:** {start_point} ve sonrası.\nAdet: {len(todo_ids)}")
     else:
         todo_ids = [mid for mid in msg_ids if mid > last_processed]
 
@@ -437,6 +437,7 @@ async def transfer_ultimate(client, message):
     # 4. TRANSFER
     processed_count = 0
     bot_index = 0
+    bot_names = ["1 (Asıl)", "2 (Yedek)"]
     
     await status_msg.edit(f"🚀 **TRANSFER BAŞLADI**\nKalan: {total_todo}")
 
@@ -452,7 +453,7 @@ async def transfer_ultimate(client, message):
                 msg = await current_ub.get_messages(src_data["chat_id"], current_msg_id)
                 if not msg or msg.empty or msg.service: sent = True; break
 
-                # HEDEF TOPIC AYARI
+                # HEDEF TOPIC AYARLARI
                 send_args = {}
                 if dst_data["topic_id"]:
                     send_args["message_thread_id"] = dst_data["topic_id"]
@@ -461,10 +462,12 @@ async def transfer_ultimate(client, message):
                     caption = msg.caption or ""
                     file_path = await current_ub.download_media(msg)
                     if file_path:
+                        # Parametreleri (**send_args) ile açarak gönderiyoruz
                         if msg.photo: await current_ub.send_photo(dst_data["chat_id"], file_path, caption=caption, **send_args)
                         elif msg.video: await current_ub.send_video(dst_data["chat_id"], file_path, caption=caption, **send_args)
                         elif msg.document: await current_ub.send_document(dst_data["chat_id"], file_path, caption=caption, **send_args)
                         elif msg.audio: await current_ub.send_audio(dst_data["chat_id"], file_path, caption=caption, **send_args)
+                        elif msg.voice: await current_ub.send_voice(dst_data["chat_id"], file_path, **send_args)
                         os.remove(file_path); sent = True
                 elif msg.text:
                     await current_ub.send_message(dst_data["chat_id"], msg.text, **send_args)
@@ -486,7 +489,7 @@ async def transfer_ultimate(client, message):
             if processed_count % 5 == 0:
                 try:
                     bar = get_progress_bar(processed_count, total_todo)
-                    await status_msg.edit(f"🔄 **AKTARIM (V15)**\n{bar}\n✅ {processed_count} / {total_todo}")
+                    await status_msg.edit(f"🛡️ **TRANSFER**\n{bar}\n✅ {processed_count} / {total_todo}\n🤖 Bot: {bot_names[bot_index]}")
                 except: pass
 
     await status_msg.edit(f"🏁 **TAMAMLANDI!**\n{processed_count} içerik aktarıldı.")
@@ -768,6 +771,7 @@ async def topic_transfer_safe(client, message):
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
