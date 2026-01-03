@@ -269,11 +269,9 @@ async def link_handler(client, message):
     except Exception as e:
         await status_msg.edit(f"❌ **Hata:** {e}")
 
-# ==================== 9. ZİNCİRLEME TRANSFER (Topic Destekli) ====================
-ABORT_FLAG = False
-
+# ==================== V37 - ZİNCİRLEME (HAFIZA TAZELEMELİ / PEER ID FIX) ====================
 @bot.on_message(filters.command("zincir") & filters.private)
-async def chain_transfer_final(client, message):
+async def chain_transfer_v37(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
@@ -288,9 +286,17 @@ async def chain_transfer_final(client, message):
         await message.reply("⚠️ **KULLANIM:** `/zincir [KAYNAK_LINK] [HEDEF_LINK]`")
         return
 
-    status = await message.reply("⚙️ **ZİNCİR BAŞLATILIYOR...**")
+    status = await message.reply("🔄 **SUNUCU HAFIZASI TAZELENİYOR...**\n(PeerId hatası almamak için gruplar taranıyor, 5-10 sn sürer...)")
 
-    # LİNK ÇÖZÜCÜ
+    # --- 1. HAFIZA TAZELEME (CRITICAL FIX) ---
+    # Userbot'un olduğu grupları tanıması için dialogları çekiyoruz.
+    try:
+        async for dialog in ub.get_dialogs(limit=None):
+            pass 
+    except Exception as e:
+        print(f"Dialog Hatası: {e}")
+
+    # --- 2. LİNK ÇÖZÜCÜ ---
     def resolve(link):
         data = {"id": None, "topic": None, "msg": 0}
         link = str(link).strip()
@@ -298,10 +304,10 @@ async def chain_transfer_final(client, message):
             if "c/" in link:
                 clean = link.split("c/")[1].split("?")[0].split("/")
                 data["id"] = int("-100" + clean[0])
-                if len(clean) == 3: # Topicli: grup/topic/msg
+                if len(clean) == 3: 
                     data["topic"] = int(clean[1])
                     data["msg"] = int(clean[2])
-                elif len(clean) == 2: # Topicsiz: grup/msg
+                elif len(clean) == 2:
                     data["msg"] = int(clean[1])
             elif "-100" in link:
                 data["id"] = int(link)
@@ -313,14 +319,21 @@ async def chain_transfer_final(client, message):
 
     if not src or not dst: await status.edit("❌ Link Hatalı"); return
 
-    # LİSTELEME
+    # --- 3. ERİŞİM KONTROLÜ ---
+    try:
+        await ub.get_chat(src["id"])
+    except Exception as e:
+        await status.edit(f"❌ **KAYNAK GRUBA ERİŞİLEMİYOR!**\nUserbot grupta olsa bile ID'yi çözemedi.\nLütfen Userbot hesabıyla gruba bir mesaj atıp tekrar dene.\nHata: {e}")
+        return
+
+    # --- 4. LİSTELEME ---
     await status.edit("📦 **LİSTE HAZIRLANIYOR...**")
     msg_ids = []
     
     try:
         async for m in ub.get_chat_history(src["id"]):
             if ABORT_FLAG: break
-            if m.id < src["msg"]: continue # Eskileri atla
+            if m.id < src["msg"]: continue 
             
             # Kaynak Topic Filtresi
             if src["topic"]:
@@ -333,13 +346,13 @@ async def chain_transfer_final(client, message):
     except Exception as e:
         await status.edit(f"❌ Erişim Hatası: {e}"); return
 
-    msg_ids.reverse() # Eskiden yeniye
+    msg_ids.reverse() 
     total = len(msg_ids)
     if total == 0: await status.edit("❌ Mesaj bulunamadı."); return
 
     await status.edit(f"🚀 **BAŞLADI**\nToplam: {total} Mesaj")
 
-    # AKTARIM
+    # --- 5. AKTARIM ---
     count = 0
     for msg_id in msg_ids:
         if ABORT_FLAG: await status.edit("🛑 Durduruldu."); return
@@ -347,11 +360,11 @@ async def chain_transfer_final(client, message):
             msg = await ub.get_messages(src["id"], msg_id)
             if not msg or msg.empty: continue
 
-            # HEDEF TOPIC AYARI
+            # Hedef Topic
             args = {}
             if dst["topic"]: args["reply_to_message_id"] = dst["topic"]
 
-            # İNDİR VE GÖNDER
+            # İNDİR / GÖNDER
             if msg.media:
                 try:
                     path = await ub.download_media(msg)
@@ -375,7 +388,7 @@ async def chain_transfer_final(client, message):
                     count += 1
                 except: pass
             
-            await asyncio.sleep(3) # Ban koruması
+            await asyncio.sleep(3) 
             
             if count % 5 == 0:
                 try: await status.edit(f"🔄 **AKTARILIYOR...**\n✅ {count} / {total}")
@@ -385,12 +398,6 @@ async def chain_transfer_final(client, message):
         except: pass
 
     await status.edit(f"🏁 **TAMAMLANDI!**\n{count} mesaj aktarıldı.")
-
-@bot.on_message(filters.command("iptal") & filters.private)
-async def stop_process(client, message):
-    global ABORT_FLAG
-    ABORT_FLAG = True
-    await message.reply("🛑 **DURDURULDU.**")
 
 # ==================== 10. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
@@ -415,3 +422,4 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
