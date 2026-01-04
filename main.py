@@ -398,7 +398,7 @@ async def chain_transfer_v37(client, message):
         except: pass
 
     await status.edit(f"🏁 **TAMAMLANDI!**\n{count} mesaj aktarıldı.")
-# ==================== V43 - KÖR TARAMA (GARANTİLİ YÖNTEM) ====================
+# ==================== V44 - FULL SÜPÜRGE (BAŞLANGIÇ FARK ETMEKSİZİN HEPSİNİ ALIR) ====================
 import os
 import asyncio
 from pyrogram import Client, filters
@@ -409,7 +409,7 @@ ABORT_FLAG = False
 SAFETY_DELAY = 3 
 
 @bot.on_message(filters.command("transfer") & filters.private)
-async def brute_force_transfer(client, message):
+async def full_dump_transfer(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
@@ -421,30 +421,27 @@ async def brute_force_transfer(client, message):
         src_link = message.command[1]
         dst_link = message.command[2]
     except:
-        await message.reply("⚠️ **KULLANIM:** `/transfer [KAYNAK_LINK] [HEDEF_LINK]`")
+        await message.reply("⚠️ **KULLANIM:** `/transfer [KAYNAK_RASTGELE_LINK] [HEDEF_LINK]`")
         return
 
-    status = await message.reply("🔄 **SUNUCU HAFIZASI TAZELENİYOR...**\n(PeerId hatasını çözmek için gruplar taranıyor...)")
+    status = await message.reply("🔄 **SUNUCU HAFIZASI TAZELENİYOR...**")
 
-    # 1. HAFIZA TAZELEME (PeerIdInvalid Çözümü)
+    # 1. HAFIZA TAZELEME (PeerIdInvalid Önlemi)
     try:
         async for d in ub.get_dialogs(limit=50): pass
     except: pass
 
     # 2. LİNK ÇÖZÜCÜ
     def resolve(link):
-        data = {"id": None, "topic": None, "msg": 0}
+        data = {"id": None, "topic": None} # Msg ID'yi artık önemsemiyoruz
         link = str(link).strip()
         try:
             if "c/" in link:
                 clean = link.split("c/")[1].split("?")[0].split("/")
                 data["id"] = int("-100" + clean[0])
-                if len(clean) == 3: 
+                if len(clean) >= 2: 
                     data["topic"] = int(clean[1])
-                    data["msg"] = int(clean[2])
-                elif len(clean) == 2:
-                    data["msg"] = int(clean[1])
-            elif "-100" in link: # Direkt ID girildiyse
+            elif "-100" in link:
                 data["id"] = int(link)
         except: return None
         return data
@@ -454,50 +451,50 @@ async def brute_force_transfer(client, message):
 
     if not src or not dst: await status.edit("❌ Link Hatalı"); return
 
-    # 3. KÖR TARAMA BAŞLIYOR (PARAMETRESİZ)
-    await status.edit(f"📦 **TÜM GRUP TARANIYOR...**\nBu işlem, Topic filtresi kullanmadan manuel ayıklama yapar.\nBiraz zaman alabilir...")
+    # 3. LİSTELEME (FİLTRESİZ - HEPSİNİ ÇEK)
+    await status.edit(f"📦 **GEÇMİŞ TARANIYOR...**\nVerdiğin linkteki konunun **EN BAŞINDAN** itibaren hepsi aranıyor.\nBu işlem biraz sürebilir...")
 
     msg_ids = []
     
     try:
-        # DİKKAT: Burada message_thread_id YOK. Tüm grubu çekiyoruz.
+        # Tüm grubu çekiyoruz
         async for m in ub.get_chat_history(src["id"]):
             if ABORT_FLAG: break
             
-            # Başlangıç mesajından öncekileri görmezden gel
-            if m.id < src["msg"]: continue
+            # --- KRİTİK DEĞİŞİKLİK BURADA ---
+            # "if m.id < src['msg']" satırını SİLDİM.
+            # Artık mesaj eski mi yeni mi bakmıyor, hepsini alıyor.
 
             is_target = False
             
-            # --- MANUEL AYIKLAMA ---
-            # Mesajın topic ID'si bizimkine uyuyor mu?
+            # --- TOPIC KONTROLÜ ---
             if src["topic"]:
                 try:
-                    # Hem yeni (message_thread_id) hem eski (reply_to) yöntemine bak
+                    # Mesaj bu konuya mı ait?
                     tid = getattr(m, "message_thread_id", None) or getattr(m, "reply_to_message_id", None)
                     
-                    if tid == src["topic"]: is_target = True # Konuya atılmış mesaj
-                    elif m.id == src["topic"]: is_target = True # Konu başlığı mesajı
+                    if tid == src["topic"]: is_target = True 
+                    elif m.id == src["topic"]: is_target = True # Konu başlığı
                 except: pass
             else:
-                # Eğer kaynakta topic yoksa (normal grupsa) hepsini al
+                # Topic yoksa (Normal grupsa) hepsini al
                 is_target = True
 
             if is_target:
                 msg_ids.append(m.id)
 
     except Exception as e:
-        await status.edit(f"❌ **TARAMA HATASI:** {e}\nUserbot gruba erişemiyor olabilir."); return
+        await status.edit(f"❌ **TARAMA HATASI:** {e}"); return
 
-    msg_ids.reverse() # Eskiden yeniye
+    msg_ids.reverse() # Eskiden yeniye sırala
     total = len(msg_ids)
     
     if total == 0: 
-        await status.edit("❌ **BU KONUDA MESAJ BULUNAMADI.**\nYa konu ID yanlış hesaplandı ya da konu boş.")
+        await status.edit("❌ **MESAJ BULUNAMADI.**\nKonu ID'si yanlış olabilir veya Userbot konuyu göremiyordur.")
         return
 
     # 4. AKTARIM DÖNGÜSÜ
-    await status.edit(f"🚀 **AKTARIM BAŞLADI**\nToplam: {total} Mesaj")
+    await status.edit(f"🚀 **AKTARIM BAŞLADI**\nToplam: {total} Mesaj (Baştan Sona)")
     
     count = 0
     fail = 0
@@ -509,13 +506,13 @@ async def brute_force_transfer(client, message):
             msg = await ub.get_messages(src["id"], msg_id)
             if not msg or msg.empty: continue
 
-            # HEDEF TOPIC AYARI (Reply Yöntemi)
+            # HEDEF TOPIC AYARI
             send_args = {}
             if dst["topic"]: send_args["reply_to_message_id"] = dst["topic"]
 
-            # İNDİRME VE GÖNDERME
             success = False
             
+            # MEDYA
             if msg.media:
                 try:
                     path = await ub.download_media(msg)
@@ -533,6 +530,7 @@ async def brute_force_transfer(client, message):
                         success = True
                 except: pass
             
+            # YAZI
             elif msg.text and msg.text.strip():
                 try:
                     await ub.send_message(dst["id"], msg.text, **send_args)
@@ -577,6 +575,7 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
 
 
