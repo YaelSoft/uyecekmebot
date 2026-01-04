@@ -398,7 +398,161 @@ async def chain_transfer_v37(client, message):
         except: pass
 
     await status.edit(f"🏁 **TAMAMLANDI!**\n{count} mesaj aktarıldı.")
+# ==================== V42 - LİNK İLE TOPIC TRANSFER (İPTAL ÖZELLİKLİ) ====================
+import os
+import asyncio
+from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
 
+# --- GLOBAL KONTROL ---
+ABORT_FLAG = False
+SAFETY_DELAY = 3 
+
+# 1. İPTAL KOMUTU
+@bot.on_message(filters.command("iptal") & filters.private)
+async def stop_transfer(client, message):
+    global ABORT_FLAG
+    ABORT_FLAG = True
+    await message.reply("🛑 **İŞLEM İPTAL EDİLDİ.**\nMevcut dosya tamamlanınca duracak.")
+
+# 2. TRANSFER KOMUTU
+@bot.on_message(filters.command("transfer") & filters.private)
+async def link_topic_transfer(client, message):
+    global ABORT_FLAG
+    ABORT_FLAG = False
+    
+    if not USERBOTS: await message.reply("❌ Userbot yok!"); return
+    ub = USERBOTS[0]
+
+    try:
+        # KOMUT: /transfer [KAYNAK_LINK] [HEDEF_LINK]
+        src_link = message.command[1]
+        dst_link = message.command[2]
+    except:
+        await message.reply(
+            "⚠️ **KULLANIM:**\n"
+            "`/transfer [KAYNAK_KONU_LINKI] [HEDEF_KONU_LINKI]`\n\n"
+            "📌 **Nasıl Link Alırım?**\n"
+            "Konunun içindeki herhangi bir mesaja sağ tıkla -> **Bağlantıyı Kopyala** de."
+        )
+        return
+
+    status = await message.reply("⚙️ **LİNKLER ANALİZ EDİLİYOR...**")
+
+    # --- LİNK ÇÖZÜCÜ (SENİN İÇİN ID HESAPLAR) ---
+    def parse_topic_link(link):
+        data = {"chat_id": None, "topic_id": None}
+        link = str(link).strip()
+        try:
+            if "c/" in link:
+                # Format: t.me/c/GRUP_ID/TOPIC_ID/MESAJ_ID
+                parts = link.split("c/")[1].split("?")[0].split("/")
+                data["chat_id"] = int("-100" + parts[0])
+                
+                # Topic ID genelde 2. sıradadır
+                if len(parts) >= 2:
+                    data["topic_id"] = int(parts[1])
+            return data
+        except: return None
+
+    src = parse_topic_link(src_link)
+    dst = parse_topic_link(dst_link)
+
+    if not src or not src["chat_id"] or not src["topic_id"]:
+        await status.edit("❌ **KAYNAK LİNK HATALI!**\nLütfen bir 'Topic' içindeki mesajın linkini at.")
+        return
+    
+    if not dst or not dst["chat_id"] or not dst["topic_id"]:
+        await status.edit("❌ **HEDEF LİNK HATALI!**\nLütfen hedef 'Topic' içindeki bir mesajın linkini at.")
+        return
+
+    # --- BİLGİLENDİRME ---
+    await status.edit(
+        f"✅ **HEDEF KİLİTLENDİ!**\n"
+        f"📤 **Kaynak:** `{src['chat_id']}` (Topic: `{src['topic_id']}`)\n"
+        f"📥 **Hedef:** `{dst['chat_id']}` (Topic: `{dst['topic_id']}`)\n\n"
+        f"📦 **İçerikler Listeleniyor...**"
+    )
+
+    # --- LİSTELEME ---
+    msg_ids = []
+    try:
+        # Sadece o Topic'teki mesajları çek
+        async for m in ub.get_chat_history(src["chat_id"], message_thread_id=src["topic_id"]):
+            if ABORT_FLAG: break
+            msg_ids.append(m.id)
+    except Exception as e:
+        await status.edit(f"❌ **LİSTE ÇEKİLEMEDİ:** {e}\nBot grupta mı? Userbot sürümü güncel mi?")
+        return
+
+    if ABORT_FLAG: await status.edit("🛑 İptal."); return
+
+    msg_ids.reverse() # Eskiden yeniye sırala
+    total = len(msg_ids)
+    
+    if total == 0: await status.edit("❌ **BU KONUDA MESAJ YOK.**"); return
+
+    await status.edit(f"🚀 **TRANSFER BAŞLADI**\nToplam: {total} İçerik")
+
+    # --- AKTARIM DÖNGÜSÜ ---
+    count = 0
+    fail = 0
+
+    for msg_id in msg_ids:
+        if ABORT_FLAG: 
+            await status.edit(f"🛑 **DURDURULDU.**\n{count} mesaj atıldı."); return
+        
+        try:
+            msg = await ub.get_messages(src["chat_id"], msg_id)
+            if not msg or msg.empty or msg.service: continue
+
+            # HEDEF TOPIC AYARI (Reply Yöntemi - En Sağlamı)
+            send_args = {"reply_to_message_id": dst["topic_id"]}
+
+            success = False
+
+            # --- MEDYA VARSA İNDİR VE AT ---
+            if msg.media:
+                try:
+                    path = await ub.download_media(msg)
+                    if path:
+                        caption = msg.caption or ""
+                        if msg.photo: await ub.send_photo(dst["chat_id"], path, caption=caption, **send_args)
+                        elif msg.video: await ub.send_video(dst["chat_id"], path, caption=caption, **send_args)
+                        elif msg.document: await ub.send_document(dst["chat_id"], path, caption=caption, **send_args)
+                        elif msg.audio: await ub.send_audio(dst["chat_id"], path, caption=caption, **send_args)
+                        elif msg.voice: await ub.send_voice(dst["chat_id"], path, **send_args)
+                        elif msg.sticker: await ub.send_sticker(dst["chat_id"], path, **send_args)
+                        elif msg.animation: await ub.send_animation(dst["chat_id"], path, caption=caption, **send_args)
+                        
+                        os.remove(path)
+                        success = True
+                except: pass # İndiremezse geç
+
+            # --- SADECE YAZI VARSA AT ---
+            elif msg.text and msg.text.strip():
+                try:
+                    await ub.send_message(dst["chat_id"], msg.text, **send_args)
+                    success = True
+                except: pass
+
+            if success: count += 1
+            else: fail += 1
+
+            # BAN YEMEMEK İÇİN BEKLE
+            await asyncio.sleep(SAFETY_DELAY)
+
+            if count % 5 == 0:
+                try: await status.edit(f"🔄 **AKTARILIYOR...**\n✅ {count} / {total}")
+                except: pass
+
+        except FloodWait as e:
+            await asyncio.sleep(e.value + 5)
+        except Exception:
+            fail += 1
+            pass # Hata olsa da durma, devam et
+
+    await status.edit(f"🏁 **BİTTİ!**\n✅ Başarılı: {count}\n❌ Atlanılan: {fail}")
 # ==================== 10. ADMİN ====================
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def addvip(c, m): set_vip(int(m.command[1]), True); await m.reply("✅")
@@ -422,4 +576,5 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
 
