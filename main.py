@@ -1,19 +1,17 @@
 import os
 import asyncio
 import logging
-import sqlite3
 import time
 from threading import Thread
-from flask import Flask, render_template
+from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.errors import FloodWait, PeerIdInvalid, UserDeactivatedBan
+from pyrogram.errors import FloodWait
 
-# ==================== 1. WEB SERVER (RENDER İÇİN) ====================
+# ==================== 1. WEB SERVER ====================
 app = Flask(__name__)
 
 @app.route('/')
-def home():
-    return "V60 TWIN TURBO ENGINE ACTIVE! 🚀"
+def home(): return "V62 TARGET SCANNER ACTIVE! 📡"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -33,12 +31,11 @@ OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 SESSION1 = os.environ.get("SESSION_STRING", "")
 SESSION2 = os.environ.get("SESSION_STRING_2", "")
 
-# Yönetici Botu
+# Yönetici Bot
 bot = Client("manager_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 
-# İşçi Botlar (Userbots)
+# İşçi Botlar
 WORKERS = []
-# Bot durumlarını takip eden sözlük: {bot_index: next_available_time}
 WORKER_STATUS = {} 
 
 if SESSION1: 
@@ -50,67 +47,83 @@ if SESSION2:
 
 ABORT_FLAG = False
 
-# ==================== 3. HAFIZA SİSTEMİ ====================
-DB_NAME = "transfer_history.db"
+# ==================== 3. HEDEF TARAYICI (BEYİN BURASI) ====================
+# Bu liste, hedef gruptaki dosyaların "Parmak İzlerini" tutacak.
+# Format: (DosyaBoyutu, VideoSüresi)
+EXISTING_FILES_CACHE = set()
 
-def init_history_db():
-    conn = sqlite3.connect(DB_NAME)
-    conn.cursor().execute('''CREATE TABLE IF NOT EXISTS history 
-                             (src_id INTEGER, msg_id INTEGER, dst_id INTEGER, 
-                             PRIMARY KEY (src_id, msg_id, dst_id))''')
-    conn.commit(); conn.close()
+def generate_signature(msg):
+    """Mesajın kimliğini (imzasını) çıkarır"""
+    size = 0
+    duration = 0
+    
+    if msg.video:
+        size = msg.video.file_size
+        duration = msg.video.duration
+    elif msg.document:
+        size = msg.document.file_size
+        # Dokümanda süre olmayabilir
+    elif msg.photo:
+        size = msg.photo.file_size
+    elif msg.audio:
+        size = msg.audio.file_size
+        duration = msg.audio.duration
+    elif msg.voice:
+        size = msg.voice.file_size
+    
+    # Eğer dosya boyutu 0 ise (sadece yazıysa) metnin hash'ini al
+    if size == 0 and msg.text:
+        return hash(msg.text.strip())
+    
+    if size == 0: return None
+    
+    # İmza: Boyut + Süre (Bu ikisi aynıysa %99 aynı dosyadır)
+    return (size, duration)
 
-def is_already_sent(src_id, msg_id, dst_id):
-    conn = sqlite3.connect(DB_NAME)
-    res = conn.cursor().execute("SELECT 1 FROM history WHERE src_id=? AND msg_id=? AND dst_id=?", 
-                                (src_id, msg_id, dst_id)).fetchone()
-    conn.close()
-    return bool(res)
+async def scan_target_group(worker, chat_id, topic_id=None):
+    """Hedef grubu tarar ve nelerin atıldığını hafızaya alır"""
+    EXISTING_FILES_CACHE.clear()
+    count = 0
+    
+    async for msg in worker.get_chat_history(chat_id):
+        if topic_id:
+            # Topic kontrolü
+            tid = getattr(msg, "message_thread_id", None) or getattr(msg, "reply_to_message_id", None)
+            if tid != topic_id and msg.id != topic_id: continue
+        
+        sig = generate_signature(msg)
+        if sig:
+            EXISTING_FILES_CACHE.add(sig)
+            count += 1
+            
+    return count
 
-def mark_as_sent(src_id, msg_id, dst_id):
-    conn = sqlite3.connect(DB_NAME)
-    try: conn.cursor().execute("INSERT INTO history VALUES (?, ?, ?)", (src_id, msg_id, dst_id))
-    except: pass
-    conn.commit(); conn.close()
-
-init_history_db()
-
-# ==================== 4. AKILLI BOT SEÇİCİ (BEYİN) ====================
+# ==================== 4. MOTOR SEÇİCİ ====================
 async def get_best_worker():
-    """En müsait botu seçer. Hepsi banlıysa en az bekleyeni bekler."""
     while True:
         now = time.time()
-        best_worker_idx = -1
+        best_idx = -1
         min_wait = float('inf')
 
-        # Tüm botları tara
         for idx, release_time in WORKER_STATUS.items():
             if now >= release_time:
-                # Bu bot müsait! Direkt bunu döndür.
                 return WORKERS[idx], idx
             else:
-                # Bu bot banlı, kalan süresine bak
-                wait_time = release_time - now
-                if wait_time < min_wait:
-                    min_wait = wait_time
-                    best_worker_idx = idx
+                wait = release_time - now
+                if wait < min_wait:
+                    min_wait = wait
+                    best_idx = idx
         
-        # Eğer buraya geldiysek HİÇBİR bot müsait değil demektir.
-        # En az beklemesi gereken botun süresi kadar uyuyalım.
-        if best_worker_idx != -1:
-            print(f"💤 Tüm motorlar soğutuluyor... Bekleme: {int(min_wait)} sn")
+        if best_idx != -1:
             await asyncio.sleep(min_wait)
-            # Uyandıktan sonra döngü başa döner ve o botu seçer.
         else:
-            # Bot yoksa (Acil durum)
             return None, -1
 
-def report_flood(worker_idx, seconds):
-    """Botun ceza yediğini sisteme işler"""
-    WORKER_STATUS[worker_idx] = time.time() + seconds + 2 # +2 sn güvenlik payı
-    print(f"⚠️ Motor {worker_idx + 1} ısındı! {seconds} sn devre dışı bırakılıyor.")
+def report_flood(idx, seconds):
+    WORKER_STATUS[idx] = time.time() + seconds + 2
+    print(f"⚠️ Motor {idx+1} Isındı: {seconds}sn")
 
-# ==================== 5. SAĞLAM İNDİRİCİ ====================
+# ==================== 5. İNDİRİCİ ====================
 async def download_with_verification(ub, msg, retries=3):
     expected_size = 0
     if msg.video: expected_size = msg.video.file_size
@@ -124,11 +137,10 @@ async def download_with_verification(ub, msg, retries=3):
         try:
             file_path = await ub.download_media(msg)
             if file_path and os.path.exists(file_path):
-                actual_size = os.path.getsize(file_path)
-                if actual_size >= expected_size or (expected_size - actual_size) < 1024:
+                actual = os.path.getsize(file_path)
+                if actual >= expected_size or (expected_size - actual) < 1024:
                     return file_path
-                else:
-                    os.remove(file_path)
+                else: os.remove(file_path)
         except:
             if file_path and os.path.exists(file_path): os.remove(file_path)
         await asyncio.sleep(0.5)
@@ -153,11 +165,11 @@ def resolve_link(link):
     return data
 
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer_twin_turbo(client, message):
+async def transfer_smart_match(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
-    if not WORKERS: await message.reply("❌ Hiç Userbot Yok!"); return
+    if not WORKERS: await message.reply("❌ Userbot Yok!"); return
     
     try:
         src_link = message.command[1]
@@ -166,9 +178,9 @@ async def transfer_twin_turbo(client, message):
         await message.reply("⚠️ **Kullanım:** `/transfer [KAYNAK] [HEDEF]`")
         return
 
-    status = await message.reply("🏎️ **V60 MOTORLARI ISITILIYOR...**")
+    status = await message.reply("📡 **HEDEF GRUP ANALİZ EDİLİYOR...**\n(Bu işlem 'Zaten Atılanları' bulmak için yapılır, biraz sürebilir)")
 
-    # Hafıza Tazele (Tüm Botlar İçin)
+    # Botları ısıt
     for w in WORKERS:
         try: async for d in w.get_dialogs(limit=10): pass
         except: pass
@@ -178,16 +190,20 @@ async def transfer_twin_turbo(client, message):
 
     if not src or not dst: await status.edit("❌ Link Hatalı"); return
 
-    start_point = src['msg'] if src['msg'] > 0 else 0
-    
-    await status.edit(f"📦 **LİSTE ÇEKİLİYOR...**\n(Bu işlem biraz sürebilir, tüm geçmiş taranıyor)")
-
-    msg_ids = []
-    # Listeyi çekmek için 1. Botu kullanıyoruz (Okuma işlemi ban yemez genelde)
-    scanner = WORKERS[0]
-    
+    # --- ADIM 1: HEDEFİ TARA ---
     try:
-        async for m in scanner.get_chat_history(src['id']):
+        # 1. Botu kullanarak hedefi tarıyoruz
+        existing_count = await scan_target_group(WORKERS[0], dst['id'], dst['topic'])
+        await status.edit(f"✅ **ANALİZ TAMAM!**\nHedef grupta {existing_count} adet dosya tespit edildi.\n\n🚀 **Kaynak Taranıyor...**")
+    except Exception as e:
+        await status.edit(f"❌ Hedef Tarama Hatası: {e}\nBot hedef grupta mı?"); return
+
+    start_point = src['msg'] if src['msg'] > 0 else 0
+    msg_ids = []
+    
+    # --- ADIM 2: KAYNAĞI LİSTELE ---
+    try:
+        async for m in WORKERS[0].get_chat_history(src['id']):
             if ABORT_FLAG: break
             if start_point > 0 and m.id < start_point: continue
             if src['topic']:
@@ -197,117 +213,111 @@ async def transfer_twin_turbo(client, message):
                 except: continue
             msg_ids.append(m.id)
     except Exception as e:
-        await status.edit(f"❌ Liste Hatası: {e}"); return
+        await status.edit(f"❌ Kaynak Liste Hatası: {e}"); return
 
     msg_ids.reverse()
     total = len(msg_ids)
-    
-    if total == 0: await status.edit("❌ Mesaj bulunamadı."); return
 
-    await status.edit(f"🚀 **TWIN TURBO AKTARIM BAŞLADI**\nToplam Hedef: {total}\nMotor Sayısı: {len(WORKERS)}")
+    await status.edit(f"🏎️ **TRANSFER BAŞLADI**\nKaynak: {total} Mesaj\nHedefteki Mevcut: {existing_count}")
 
     stats = {"success": 0, "skipped": 0, "failed": 0}
 
+    # --- ADIM 3: AKILLI AKTARIM ---
     for msg_id in msg_ids:
         if ABORT_FLAG: await status.edit("🛑 **Durduruldu.**"); return
         
-        # 1. HAFIZA KONTROLÜ
-        if is_already_sent(src['id'], msg_id, dst['id']):
-            stats["skipped"] += 1
-            if stats["skipped"] % 100 == 0:
-                try: await status.edit(f"⏩ **HIZLI GEÇİŞ**\nAtlanan: {stats['skipped']}")
-                except: pass
-            continue
-
-        # 2. GÖNDERİM DÖNGÜSÜ (Başarılı olana kadar veya vazgeçene kadar)
-        sent_success = False
-        retry_count = 0
-        
-        while not sent_success and retry_count < 10: # Max 10 deneme
-            if ABORT_FLAG: break
+        # Sırada hangi mesaj var, onu çekelim (Sadece Metadata)
+        # Hangi bot müsaitse o baksın
+        check_worker, _ = await get_best_worker()
+        try:
+            msg = await check_worker.get_messages(src['id'], msg_id)
+            if not msg or msg.empty: continue
             
-            # Müsait botu seç
-            current_worker, worker_idx = await get_best_worker()
+            # --- KRİTİK EŞLEŞTİRME KONTROLÜ ---
+            sig = generate_signature(msg)
             
-            try:
-                # Mesajı çek
-                msg = await current_worker.get_messages(src['id'], msg_id)
-                if not msg or msg.empty: 
-                    sent_success = True # Mesaj yoksa başarılı sayıp geç
-                    break
-
-                send_args = {}
-                if dst['topic']: send_args["reply_to_message_id"] = dst['topic']
+            if sig and sig in EXISTING_FILES_CACHE:
+                # ZATEN VAR!
+                stats["skipped"] += 1
+                if stats["skipped"] % 100 == 0:
+                    try: await status.edit(f"⏩ **ZATEN VAR (GEÇİLİYOR)...**\nAtlanan: {stats['skipped']}")
+                    except: pass
+                continue # İndirme yapma, direkt diğer mesaja geç!
+            
+            # YOKSA İNDİR VE GÖNDER
+            sent = False
+            retry = 0
+            
+            while not sent and retry < 10:
+                if ABORT_FLAG: break
+                worker, w_idx = await get_best_worker()
                 
-                # --- YÜKLEME ---
-                if msg.media:
-                    path = await download_with_verification(current_worker, msg)
-                    if path:
-                        caption = msg.caption or ""
+                try:
+                    # Mesajı tekrar çek (Taze session ile)
+                    # (Yukarıda sadece kontrol için çekmiştik, şimdi işlem için çekiyoruz)
+                    # Performans için: Eğer check_worker ile worker aynıysa tekrar çekmeye gerek yok ama garanti olsun.
+                    
+                    send_args = {}
+                    if dst['topic']: send_args["reply_to_message_id"] = dst['topic']
+                    
+                    if msg.media:
+                        path = await download_with_verification(worker, msg)
+                        if path:
+                            caption = msg.caption or ""
+                            try:
+                                if msg.video:
+                                    await worker.send_video(dst['id'], path, caption=caption, 
+                                        duration=msg.video.duration, width=msg.video.width, height=msg.video.height, **send_args)
+                                elif msg.photo: await worker.send_photo(dst['id'], path, caption=caption, **send_args)
+                                elif msg.document: await worker.send_document(dst['id'], path, caption=caption, **send_args)
+                                elif msg.audio: await worker.send_audio(dst['id'], path, caption=caption, **send_args)
+                                elif msg.voice: await worker.send_voice(dst['id'], path, **send_args)
+                                sent = True
+                            except FloodWait as e:
+                                report_flood(w_idx, e.value)
+                                retry += 1; continue
+                            except: sent = False; break
+                            finally:
+                                if os.path.exists(path): os.remove(path)
+                        else: sent = False; break
+                    
+                    elif msg.text:
                         try:
-                            if msg.video:
-                                await current_worker.send_video(dst['id'], path, caption=caption, 
-                                    duration=msg.video.duration, width=msg.video.width, height=msg.video.height, **send_args)
-                            elif msg.photo: await current_worker.send_photo(dst['id'], path, caption=caption, **send_args)
-                            elif msg.document: await current_worker.send_document(dst['id'], path, caption=caption, **send_args)
-                            elif msg.audio: await current_worker.send_audio(dst['id'], path, caption=caption, **send_args)
-                            elif msg.voice: await current_worker.send_voice(dst['id'], path, **send_args)
-                            # Başarılı!
-                            sent_success = True
+                            await worker.send_message(dst['id'], msg.text, **send_args)
+                            sent = True
                         except FloodWait as e:
-                            # BU BOT BAN YEDİ!
-                            report_flood(worker_idx, e.value)
-                            retry_count += 1
-                            continue # Döngü başına dön, diğer botu seç
-                        except Exception as e:
-                            print(f"Hata: {e}")
-                            sent_success = False # Kritik hata, geç
-                            break
-                        finally:
-                            if os.path.exists(path): os.remove(path)
-                    else:
-                        sent_success = False # İndirilemedi
-                        break
-                
-                elif msg.text and msg.text.strip():
-                    try:
-                        await current_worker.send_message(dst['id'], msg.text, **send_args)
-                        sent_success = True
-                    except FloodWait as e:
-                        report_flood(worker_idx, e.value)
-                        retry_count += 1
-                        continue
-                    except:
-                        break
+                            report_flood(w_idx, e.value)
+                            retry += 1; continue
+                        except: break
 
-            except FloodWait as e:
-                report_flood(worker_idx, e.value)
-                retry_count += 1
-                continue # Diğer bota geç
-            except Exception:
-                break # Mesajı çekemedik vs.
+                except FloodWait as e:
+                    report_flood(w_idx, e.value)
+                    retry += 1; continue
+                except: break
 
-        # Döngü bitti
-        if sent_success:
-            stats["success"] += 1
-            mark_as_sent(src['id'], msg_id, dst['id'])
-        else:
-            if stats["skipped"] == 0: # Sadece gerçekten denenip atılamayanları say
-                stats["failed"] += 1
+            if sent:
+                stats["success"] += 1
+                # Başarılı atılanı da hafızaya ekle ki aynı döngüde tekrar atmasın
+                if sig: EXISTING_FILES_CACHE.add(sig)
+            else:
+                if stats["skipped"] == 0: stats["failed"] += 1
 
-        # Raporlama
-        if (stats["success"] + stats["failed"]) % 5 == 0:
-            try: await status.edit(
-                f"🏎️ **TWIN TURBO AKTİF**\n"
-                f"✅: {stats['success']} | ⏭️: {stats['skipped']} | ❌: {stats['failed']}\n"
-                f"📉 Kalan: {total - (stats['success'] + stats['skipped'] + stats['failed'])}"
-            )
-            except: pass
+            if (stats["success"] + stats["failed"]) % 5 == 0:
+                try: await status.edit(
+                    f"📊 **DURUM**\n"
+                    f"✅: {stats['success']} | ⏩: {stats['skipped']} | ❌: {stats['failed']}\n"
+                    f"📉 Kalan: {total - (stats['success'] + stats['skipped'] + stats['failed'])}"
+                )
+                except: pass
+
+        except Exception as e:
+            # Mesajı çekemezse (Silinmiş vs.)
+            stats["failed"] += 1
 
     await status.edit(
-        f"🏁 **BİTİŞ ÇİZGİSİ!**\n"
-        f"✅ Toplam: {stats['success']}\n"
-        f"⏭️ Atlanan: {stats['skipped']}\n"
+        f"🏁 **İŞLEM TAMAMLANDI!**\n"
+        f"✅ Yeni Atılan: {stats['success']}\n"
+        f"⏩ Zaten Vardı: {stats['skipped']}\n"
         f"❌ Hata: {stats['failed']}"
     )
 
@@ -315,22 +325,17 @@ async def transfer_twin_turbo(client, message):
 async def stop_cmd(c, m):
     global ABORT_FLAG
     ABORT_FLAG = True
-    await m.reply("🛑 **FRENE BASILDI! Durduruluyor...**")
+    await m.reply("🛑 **Durduruluyor...**")
 
 # ==================== 7. BAŞLATMA ====================
 async def main():
-    print("V60 Motorları Çalıştırılıyor...")
+    print("V62 Target Scanner Başlatılıyor...")
     keep_alive()
     await bot.start()
     for i, ub in enumerate(WORKERS):
-        try: 
-            await ub.start()
-            print(f"✅ Motor {i+1} Hazır!")
-        except Exception as e: 
-            print(f"⚠️ Motor {i+1} Arızalı: {e}")
-            
+        try: await ub.start(); print(f"✅ Motor {i+1} Hazır")
+        except: pass
     await idle()
-    
     await bot.stop()
     for ub in WORKERS:
         try: await ub.stop()
