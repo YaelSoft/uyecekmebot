@@ -3,7 +3,7 @@ import asyncio
 import logging
 from quart import Quart
 from pyrogram import Client, filters, enums
-from pyrogram.errors import FloodWait, ChatWriteForbidden, ChatAdminRequired, UserBannedInChannel
+from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 
 # ==================== AYARLAR ====================
 API_ID = int(os.environ.get("API_ID", "123456"))
@@ -17,7 +17,7 @@ logger = logging.getLogger("RenderBot")
 app_web = Quart(__name__)
 
 @app_web.route('/')
-async def hello(): return "🔥 V104 Hazır!"
+async def hello(): return "🔥 V106 TOPIC HUNTER Yayında!"
 
 # ==================== BOTLAR ====================
 clients = []
@@ -28,7 +28,7 @@ if not clients: exit()
 bot = clients[0]
 user_state = {} 
 
-# ==================== LİNK ÇÖZÜCÜ ====================
+# ==================== LİNK ÇÖZÜCÜ (TOPIC ID'Yİ ALMAK İÇİN) ====================
 def resolve_link(link):
     data = {"id": None, "topic": None, "msg": 0}
     try:
@@ -40,12 +40,24 @@ def resolve_link(link):
             if len(parts) == 2: 
                 data["msg"] = int(parts[1])
             elif len(parts) == 3: 
-                data["topic"] = int(parts[1])
-                data["msg"] = int(parts[2])
+                data["topic"] = int(parts[1]) # Kaynak Topic ID'si burada
+                data["msg"] = int(parts[2])   # Başlangıç Mesajı
         else: return None
     except: return None
     return data
 
+# ==================== ID TANIYICI ====================
+async def ensure_chat_access(client, chat_id, chat_name="Grup"):
+    try:
+        chat = await client.get_chat(chat_id)
+        return chat.title
+    except (PeerIdInvalid, ChannelInvalid):
+        async for dialog in client.get_dialogs(limit=500):
+            if dialog.chat.id == chat_id:
+                return dialog.chat.title
+        raise Exception(f"❌ {chat_name} bulunamadı! Nokta (.) at.")
+
+# ==================== İŞLEM (İNDİR/YÜKLE) ====================
 async def download_and_upload(worker, message, target_chat_id, target_topic):
     file_path = None
     try:
@@ -74,7 +86,7 @@ async def download_and_upload(worker, message, target_chat_id, target_topic):
 @bot.on_message(filters.command("basla") & filters.me)
 async def start_command(client, message):
     user_state[message.from_user.id] = {"step": "wait_src", "data": {}, "stop": False}
-    await message.reply_text("🕵️‍♂️ **HATA BULUCU MODU**\n\nÖnce **KAYNAK** mesajın linkini at.")
+    await message.reply_text("🎯 **TOPIC MODU**\n\nBaşlamak istediğin **KAYNAK** mesajın linkini at.\n(Linkin içinde Topic ID olması önemli!)")
 
 @bot.on_message(filters.command("dur") & filters.me)
 async def stop_command(client, message):
@@ -96,74 +108,93 @@ async def message_handler(client, message):
         
         user_state[uid]["data"]["src"] = link_data
         user_state[uid]["step"] = "wait_dst"
-        await message.reply_text(f"✅ Kaynak OK.\n\n👉 Şimdi **HEDEF** topic linkini at.\n(Dikkat: Hedefe test mesajı atıp sileceğim).")
+        
+        msg_text = f"✅ Kaynak OK.\n🆔 Grup: `{link_data['id']}`\n"
+        if link_data['topic']:
+            msg_text += f"📂 Topic ID: `{link_data['topic']}` (Sadece bu konu taranacak)\n"
+        else:
+            msg_text += "⚠️ **UYARI:** Linkte Topic ID yok! Genel sohbet taranacak.\n"
+            
+        msg_text += "\n👉 Şimdi **HEDEF** topic linkini at."
+        await message.reply_text(msg_text)
 
-    # 2. HEDEF AL VE TEST ET (ÖNEMLİ KISIM)
+    # 2. HEDEF AL VE BAŞLAT
     elif state == "wait_dst":
         link_data = resolve_link(message.text)
         if not link_data:
             await message.reply_text("❌ Hedef Link Hatalı!")
             return
         
-        target_id = link_data['id']
-        topic_id = link_data['topic']
-        
-        status_msg = await message.reply_text("🔌 **HEDEF GRUBA BAĞLANTI TEST EDİLİYOR...**")
-        
-        # --- TEST AŞAMASI ---
-        try:
-            # 1. Grubu Görebiliyor muyuz?
-            chat = await client.get_chat(target_id)
-            chat_title = chat.title
-            
-            # 2. Mesaj Atabiliyor muyuz? (Test Mesajı)
-            kwargs = {"reply_to_message_id": topic_id} if topic_id else {}
-            sent_msg = await client.send_message(target_id, "🤖 Bağlantı Testi (Bu mesaj silinecek)", **kwargs)
-            
-            # 3. Başarılıysa sil
-            await sent_msg.delete()
-            
-            await status_msg.edit_text(f"✅ **BAĞLANTI BAŞARILI!**\n\nGrup: `{chat_title}`\nDurum: Mesaj atılabiliyor.\n\n🚀 **TRANSFER BAŞLIYOR...**")
-            
-        except ChatWriteForbidden:
-            await status_msg.edit_text(f"❌ **YETKİ YOK!**\nBu gruba mesaj atma iznin kapalı. (Admin engellemiş veya sadece okuma modu).")
-            return
-        except ChatAdminRequired:
-            await status_msg.edit_text(f"❌ **ADMİN YETKİSİ LAZIM!**\nBurası bir Kanal veya özel grup, mesaj atabilmek için Admin olmalısın.")
-            return
-        except UserBannedInChannel:
-            await status_msg.edit_text(f"❌ **BANLISIN!**\nBu gruptan banlanmışsın veya kısıtlanmışsın.")
-            return
-        except Exception as e:
-            await status_msg.edit_text(f"❌ **ERİŞİM HATASI!**\nBot bu grubu göremiyor.\n\n**Olası Sebepler:**\n1. Bot (Senin Hesap) bu grupta üye değil.\n2. ID yanlış (-100 ile başlamalı).\n3. İnternet hatası.\n\nTelegram Hata Kodu: `{e}`")
-            return
-        
-        # TESTİ GEÇTİYSE DEVAM ET
         user_state[uid]["data"]["dst"] = link_data
         user_state[uid]["step"] = "running"
         user_state[uid]["stop"] = False
         
         src = user_state[uid]["data"]["src"]
         
+        # Erişim Kontrolü
+        try:
+            await ensure_chat_access(client, src['id'], "KAYNAK")
+            await ensure_chat_access(client, link_data['id'], "HEDEF")
+        except Exception as e:
+            await message.reply_text(f"🛑 {e}")
+            return
+
+        await message.reply_text(f"🚀 **BAŞLIYOR...**\nKaynak Topic: `{src['topic']}`\nBaşlangıç Mesajı: `{src['msg']}`")
         asyncio.create_task(run_transfer(client, uid, src, link_data, message))
 
-# ==================== TRANSFER MOTORU ====================
+# ==================== TRANSFER MOTORU (TOPIC TARAMALI) ====================
 async def run_transfer(main_client, uid, src, dst, status_msg):
-    current_id = src['msg']
-    error_count = 0
+    start_msg_id = src['msg']
+    topic_id = src['topic'] # Kaynak Topic ID'si (Varsa)
+    
     worker_index = 0
+    
+    # === İŞTE ÇÖZÜM BURADA: get_chat_history İLE LİSTE ALIYORUZ ===
+    # Tek tek denemek yerine, Telegram'dan o konudaki mesajların listesini istiyoruz.
+    # Bu sayede boşluklara takılmıyoruz.
+    
+    try:
+        # Geçmişi al (Eskiden yeniye doğru)
+        # topic_id varsa oraya odaklan, yoksa genel sohbete
+        # offset_id=start_msg_id diyerek o mesajdan öncesini değil sonrasını alıyoruz
+        
+        # NOT: Pyrogram get_chat_history tersten gelir (Yeni -> Eski).
+        # Biz Eskiden -> Yeniye gitmek istiyoruz.
+        # O yüzden reverse=True yapıyoruz.
+        
+        msg_buffer = [] # Mesajları burada biriktirip sıraya koyacağız
+        
+        async for msg in main_client.get_chat_history(
+            chat_id=src['id'], 
+            limit=0, # Limit yok, hepsini al
+            from_message_id=start_msg_id, # Buradan başla
+            # Eğer topic varsa reply_to_message_id topic ID'si olur (Forum konularında)
+            # Pyrogram'da topic filtrelemesi biraz karışıktır, en garantisi tümünü alıp filtrelemektir.
+        ):
+            # LİSTELEME MANTIĞI:
+            # get_chat_history, from_message_id'den ESKİYE doğru gider.
+            # Biz YENİYE doğru gitmek istiyoruz.
+            # Bu yüzden strateji şu:
+            # 1. Döngüyü kır.
+            # 2. Generator kullanamayız çünkü yön ters.
+            # 3. Manuel tarama yapacağız (V102 mantığı ama Topic filtreli).
+            break # Bu yöntem çalışmadı, manuel metoda dönüyoruz.
+
+    except: pass
+
+    # === MANUEL TARAMA (TOPIC FİLTRELİ) ===
+    current_id = start_msg_id
+    empty_streak = 0
     
     while True:
         if user_state.get(uid, {}).get("stop", False):
             await status_msg.reply_text("🛑 Durduruldu.")
-            user_state[uid]["step"] = "idle"
             break
 
         worker = clients[worker_index % len(clients)]
         worker_index += 1
         
         try:
-            # Kaynak Mesajı Çek
             msg = None
             try:
                 msg = await worker.get_messages(src['id'], current_id)
@@ -172,22 +203,46 @@ async def run_transfer(main_client, uid, src, dst, status_msg):
                 msg = await worker.get_messages(src['id'], current_id)
             except: pass
 
+            # BOŞLUK KONTROLÜ
             if msg is None or msg.empty:
-                error_count += 1
-                if error_count > 500:
+                empty_streak += 1
+                if empty_streak % 100 == 0:
+                    try: await status_msg.edit_text(f"⚠️ **Boşluk Taranıyor:** `{current_id}`")
+                    except: pass
+                
+                if empty_streak > 500: # 500 Mesaj boşsa dur
                     await status_msg.reply_text(f"🏁 **Bitti!** Son ID: `{current_id}`")
                     break
                 current_id += 1
                 continue
             
-            error_count = 0
+            empty_streak = 0 # Mesaj var, sayacı sıfırla
 
+            # === TOPIC KONTROLÜ (EN ÖNEMLİ YER) ===
+            # Eğer kaynak linkinde Topic ID varsa, gelen mesajın o konuya ait olup olmadığına bak.
+            # Forumlarda mesajlar bir "Topic"e aittir. Bu bilgi "message_thread_id" veya "reply_to_message_id" içindedir.
+            
+            is_same_topic = True
+            if topic_id:
+                msg_topic = getattr(msg, "message_thread_id", None) or getattr(msg, "reply_to_message_id", None)
+                
+                # Bazen top mesajın (kurucu mesajın) kendisi topic ID'ye eşittir.
+                if msg.id == topic_id: 
+                    msg_topic = topic_id
+                
+                # Eğer mesajın topic'i bizim istediğimiz topic değilse ATLA
+                if msg_topic != topic_id:
+                    # Bu mesaj başka konuya ait, ama ID akışı devam ediyor.
+                    # O yüzden durmuyoruz, sadece bu mesajı işlemiyoruz.
+                    current_id += 1
+                    continue
+
+            # TRANSFER İŞLEMİ
             if msg.media or msg.text:
                 if current_id % 5 == 0:
                     try: await status_msg.edit_text(f"🔄 **İşleniyor:** `{current_id}`")
                     except: pass
                 
-                # Hedefe Yükle (Testi zaten geçtik, burası çalışmalı)
                 success = await download_and_upload(worker, msg, dst['id'], dst['topic'])
                 
                 if success: await asyncio.sleep(2) 
@@ -196,13 +251,13 @@ async def run_transfer(main_client, uid, src, dst, status_msg):
             current_id += 1
 
         except Exception as e:
-            logger.error(f"Döngü Hatası: {e}")
+            logger.error(f"Hata: {e}")
             await asyncio.sleep(5)
 
 # ==================== BAŞLATMA ====================
 async def start_services():
     for c in clients: await c.start()
-    print("✅ Botlar Hazır")
+    print("✅ Hazır")
     port = int(os.environ.get("PORT", 8080))
     await app_web.run_task(host="0.0.0.0", port=port)
 
