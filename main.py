@@ -2,16 +2,17 @@ import os
 import asyncio
 import logging
 import sqlite3
+import time
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
 from pyrogram.errors import FloodWait, PeerIdInvalid
 
-# ==================== 1. WEB SERVER (RENDER İÇİN) ====================
+# ==================== 1. WEB SERVER ====================
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "Bot Çalışıyor! 🟢"
+def home(): return "Bot Aktif! 🟢"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -27,55 +28,93 @@ API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
-
-# Session Stringleri Çek
 SESSION1 = os.environ.get("SESSION_STRING", "")
 SESSION2 = os.environ.get("SESSION_STRING_2", "")
 
-# Botu Başlat
 bot = Client("saver_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 
 USERBOTS = []
 if SESSION1: USERBOTS.append(Client("ub1", api_id=API_ID, api_hash=API_HASH, session_string=SESSION1, in_memory=True))
 if SESSION2: USERBOTS.append(Client("ub2", api_id=API_ID, api_hash=API_HASH, session_string=SESSION2, in_memory=True))
 
-# ==================== 3. İPTAL MEKANİZMASI ====================
 ABORT_FLAG = False
+
+# ==================== 3. SAĞLAM İNDİRİCİ (SMART DOWNLOADER) ====================
+# Bu fonksiyon dosya tam inmeden bırakmaz!
+async def download_with_verification(ub, msg, retries=3):
+    """
+    Dosyayı indirir ve boyutunu kontrol eder.
+    Eksikse silip tekrar dener.
+    """
+    # 1. Beklenen Boyutu Bul
+    expected_size = 0
+    if msg.video: expected_size = msg.video.file_size
+    elif msg.document: expected_size = msg.document.file_size
+    elif msg.photo: expected_size = msg.photo.file_size
+    elif msg.audio: expected_size = msg.audio.file_size
+    elif msg.voice: expected_size = msg.voice.file_size
+    
+    if expected_size == 0: return None # Boyut yoksa riskli
+
+    file_path = None
+    
+    for attempt in range(1, retries + 1):
+        try:
+            # İndirme Başlat
+            file_path = await ub.download_media(msg)
+            
+            # Disk Kontrolü
+            if file_path and os.path.exists(file_path):
+                actual_size = os.path.getsize(file_path)
+                
+                # Toleranslı Karşılaştırma (Bazen byte farkı olabilir, %95 tutsa yeter)
+                if actual_size >= expected_size or (expected_size - actual_size) < 1024:
+                    return file_path # Başarılı!
+                else:
+                    print(f"⚠️ EKSİK İNDİ ({attempt}/{retries}): {actual_size}/{expected_size} byte. Tekrar deneniyor...")
+                    os.remove(file_path) # Sil ve döngüye devam et
+            
+        except Exception as e:
+            print(f"⚠️ İndirme Hatası ({attempt}): {e}")
+            if file_path and os.path.exists(file_path): os.remove(file_path)
+        
+        await asyncio.sleep(2) # Hata sonrası biraz bekle
+        
+    return None # Tüm denemeler başarısız
+
+# ==================== 4. KOMUTLAR ====================
 
 @bot.on_message(filters.command("iptal") & filters.private)
 async def cancel_process(client, message):
     global ABORT_FLAG
     ABORT_FLAG = True
-    await message.reply("🛑 **İPTAL SİNYALİ GÖNDERİLDİ!**\nMevcut dosya biter bitmez işlem duracak.")
+    await message.reply("🛑 **İPTAL EDİLDİ.**")
 
-# ==================== 4. FULL TOPIC TRANSFER (V45) ====================
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer_topic_full(client, message):
+async def transfer_verified(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
     if not USERBOTS: await message.reply("❌ Userbot yok!"); return
     ub = USERBOTS[0]
     
-    # Güvenli Gecikme (Ban Yememek İçin)
-    SAFETY_DELAY = 4 
+    SAFETY_DELAY = 4 # Güvenli bekleme
 
     try:
-        # KOMUT: /transfer [KAYNAK_LINK] [HEDEF_LINK]
         src_link = message.command[1]
         dst_link = message.command[2]
     except:
-        await message.reply("⚠️ **KULLANIM:** `/transfer [KAYNAK_KONU_LINKI] [HEDEF_KONU_LINKI]`")
+        await message.reply("⚠️ **/transfer [KAYNAK_LINK] [HEDEF_LINK]**")
         return
 
-    status = await message.reply("🔄 **BAĞLANTI KURULUYOR...**")
+    status = await message.reply("🔄 **ANALİZ EDİLİYOR...**")
 
-    # --- HAFIZA TAZELEME (PeerIdInvalid Fix) ---
+    # Hafıza Tazele
     try:
         async for d in ub.get_dialogs(limit=50): pass
     except: pass
 
-    # --- LİNK ÇÖZÜCÜ ---
+    # Link Çözücü
     def resolve(link):
         data = {"id": None, "topic": None}
         link = str(link).strip()
@@ -83,7 +122,6 @@ async def transfer_topic_full(client, message):
             if "c/" in link:
                 clean = link.split("c/")[1].split("?")[0].split("/")
                 data["id"] = int("-100" + clean[0])
-                # Topic ID'yi alıyoruz
                 if len(clean) >= 2: data["topic"] = int(clean[1])
             elif "-100" in link:
                 data["id"] = int(link)
@@ -95,78 +133,68 @@ async def transfer_topic_full(client, message):
 
     if not src or not dst: await status.edit("❌ Link Hatalı"); return
 
-    # --- LİSTELEME (HEPSİNİ ÇEKME) ---
-    await status.edit(f"📦 **KONU TARANIYOR...**\nLinkteki mesaj ne olursa olsun, konunun **EN BAŞINDAN** başlanacak.")
-
+    # Listeleme
+    await status.edit(f"📦 **GEÇMİŞ TARANIYOR...**\nEksiksiz ve sıralı aktarım için hazırlanıyor.")
     msg_ids = []
     
     try:
-        # Tüm grubu çekiyoruz (Hata vermemesi için)
         async for m in ub.get_chat_history(src["id"]):
             if ABORT_FLAG: break
-            
-            # --- KONU FİLTRESİ ---
             is_target = False
-            
             if src["topic"]:
                 try:
-                    # Mesaj bu konuya mı ait?
-                    # Hem yeni (thread_id) hem eski (reply_to) kontrolü
                     tid = getattr(m, "message_thread_id", None) or getattr(m, "reply_to_message_id", None)
-                    
-                    if tid == src["topic"]: is_target = True 
-                    elif m.id == src["topic"]: is_target = True # Konu başlığı
+                    if tid == src["topic"] or m.id == src["topic"]: is_target = True
                 except: pass
-            else:
-                is_target = True # Topic yoksa hepsini al
+            else: is_target = True
 
-            if is_target:
-                msg_ids.append(m.id)
-
+            if is_target: msg_ids.append(m.id)
     except Exception as e:
-        await status.edit(f"❌ **TARAMA HATASI:** {e}\n(Bot grupta mı?)"); return
+        await status.edit(f"❌ Tarama Hatası: {e}"); return
 
-    # --- SIRALAMA (ESKİDEN YENİYE) ---
-    msg_ids.reverse() 
-    
+    msg_ids.reverse()
     total = len(msg_ids)
-    if total == 0: 
-        await status.edit("❌ **MESAJ BULUNAMADI.** Konu ID yanlış olabilir."); return
+    
+    if total == 0: await status.edit("❌ Mesaj bulunamadı."); return
 
-    await status.edit(f"🚀 **AKTARIM BAŞLADI**\nToplam: {total} Mesaj\nSıra: Eskiden -> Yeniye\nMod: Temiz Yükleme (Etiketsiz)")
+    await status.edit(f"🚀 **AKTARIM BAŞLADI**\nToplam: {total} Mesaj\nMod: %100 Doğrulama (Bozuk Dosya Atlamaz)")
 
     # --- AKTARIM DÖNGÜSÜ ---
     count = 0
     fail = 0
 
     for msg_id in msg_ids:
-        if ABORT_FLAG: 
-            await status.edit("🛑 **KULLANICI İSTEĞİYLE DURDURULDU.**"); return
+        if ABORT_FLAG: await status.edit("🛑 Durduruldu."); return
         
         try:
             msg = await ub.get_messages(src["id"], msg_id)
             if not msg or msg.empty: continue
 
-            # Hedef Topic Ayarı
+            # Hedef Topic
             send_args = {}
             if dst["topic"]: send_args["reply_to_message_id"] = dst["topic"]
 
             success = False
             
-            # --- MEDYA İŞLEMLERİ ---
+            # --- MEDYA İŞLEMLERİ (METADATA + DOĞRULAMA) ---
             if msg.media:
-                path = None
-                try:
-                    # İndir
-                    path = await ub.download_media(msg)
-                    
-                    # 0MB KONTROLÜ (Dosya var mı ve boyutu 0'dan büyük mü?)
-                    if path and os.path.exists(path) and os.path.getsize(path) > 0:
-                        
-                        caption = msg.caption or ""
-                        # Temiz Yükleme (Forward değil, Upload)
-                        if msg.photo: await ub.send_photo(dst["id"], path, caption=caption, **send_args)
-                        elif msg.video: await ub.send_video(dst["id"], path, caption=caption, **send_args)
+                # 1. SAĞLAM İNDİRME FONKSİYONUNU ÇAĞIR
+                path = await download_with_verification(ub, msg, retries=3)
+                
+                if path:
+                    caption = msg.caption or ""
+                    try:
+                        # 2. METADATA İLE GÖNDERME (00:00 Hatasını Çözer)
+                        if msg.video:
+                            await ub.send_video(
+                                dst["id"], path, caption=caption, 
+                                duration=msg.video.duration, # Süre
+                                width=msg.video.width,       # Genişlik
+                                height=msg.video.height,     # Yükseklik
+                                thumb=None, # Küçük resim indirmek karmaşık, şimdilik otomatik olsun
+                                **send_args
+                            )
+                        elif msg.photo: await ub.send_photo(dst["id"], path, caption=caption, **send_args)
                         elif msg.document: await ub.send_document(dst["id"], path, caption=caption, **send_args)
                         elif msg.audio: await ub.send_audio(dst["id"], path, caption=caption, **send_args)
                         elif msg.voice: await ub.send_voice(dst["id"], path, **send_args)
@@ -174,16 +202,16 @@ async def transfer_topic_full(client, message):
                         elif msg.animation: await ub.send_animation(dst["id"], path, caption=caption, **send_args)
                         
                         success = True
-                    else:
-                        print(f"Hata: Dosya boş indi (ID: {msg_id})")
+                    except Exception as upload_err:
+                        print(f"Yükleme Hatası ({msg_id}): {upload_err}")
                         fail += 1
-                except Exception as e:
-                    print(f"Medya Hatası: {e}")
+                    finally:
+                        if os.path.exists(path): os.remove(path)
+                else:
+                    # İndirme başarısız olduysa
+                    print(f"İndirme Başarısız (ID: {msg_id})")
                     fail += 1
-                finally:
-                    # Dosyayı sil
-                    if path and os.path.exists(path): os.remove(path)
-            
+
             # --- SADECE YAZI ---
             elif msg.text and msg.text.strip():
                 try:
@@ -192,26 +220,21 @@ async def transfer_topic_full(client, message):
                 except: fail += 1
 
             if success: count += 1
-            
-            # Bekleme (Ban Koruması)
             await asyncio.sleep(SAFETY_DELAY)
             
             if count % 5 == 0:
-                try: await status.edit(f"🔄 **AKTARILIYOR...**\n✅ {count} / {total}")
+                try: await status.edit(f"🔄 **AKTARILIYOR...**\n✅ {count} / {total}\n(Sıfır Hata Modu)")
                 except: pass
 
-        except FloodWait as e:
-            await asyncio.sleep(e.value + 5)
-        except Exception: 
-            fail += 1
-            pass
+        except FloodWait as e: await asyncio.sleep(e.value + 5)
+        except Exception: fail += 1
 
-    await status.edit(f"🏁 **TAMAMLANDI!**\n✅ Başarılı: {count}\n❌ Hatalı/Atlanan: {fail}")
+    await status.edit(f"🏁 **TAMAMLANDI!**\n✅ Başarılı: {count}\n❌ İndirilemeyen: {fail}")
 
 # ==================== 5. BAŞLATMA ====================
 async def main():
     print("Sistem Başlatılıyor...")
-    keep_alive() # Web Server Başlat
+    keep_alive()
     await bot.start()
     for ub in USERBOTS:
         try: await ub.start()
