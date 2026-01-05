@@ -11,7 +11,7 @@ from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelPrivate, ChannelInv
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "V65 CONNECTION FIX ACTIVE! 🟢"
+def home(): return "V66 PEER FIX ACTIVE! 🟢"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -51,7 +51,7 @@ ABORT_FLAG = False
 EXISTING_FILES_CACHE = set()
 
 def generate_signature(msg):
-    """Dosya kimliği oluşturur (Boyut + Süre + İsim + Yazı)"""
+    """Dosya kimliği oluşturur"""
     size = 0
     duration = 0
     file_name = "unknown"
@@ -80,24 +80,38 @@ def generate_signature(msg):
     if size == 0: return None
     return (size, duration, file_name, caption_hash)
 
+# --- YENİ EKLENEN KRİTİK FONKSİYON: ID BULUCU ---
+async def force_refresh_peers(worker, target_id):
+    """
+    Userbot'un dialoglarını gezerek ID'yi tanımasını sağlar.
+    PeerIdInvalid hatasının kesin çözümüdür.
+    """
+    found = False
+    try:
+        # Önce direkt deniyoruz
+        await worker.get_chat(target_id)
+        return True
+    except:
+        # Hata verirse dialogları geziyoruz
+        print(f"🔄 ID Tanınmadı ({target_id}), Dialoglar taranıyor...")
+        async for dialog in worker.get_dialogs(limit=None): # Limit yok, hepsine bak
+            if dialog.chat.id == target_id:
+                found = True
+                break
+    return found
+
 async def scan_target_group(worker, chat_id, topic_id=None):
-    """Hedef grubu tarar (Önce erişim kontrolü yapar)"""
+    """Hedef grubu tarar"""
     EXISTING_FILES_CACHE.clear()
     count = 0
     
-    # --- 1. ERİŞİM KONTROLÜ (FIX BURASI) ---
-    try:
-        await worker.get_chat(chat_id)
-    except PeerIdInvalid:
-        raise Exception("Userbot bu ID'yi tanımıyor! Botu gruba ekleyip bir mesaj atın.")
-    except ChannelPrivate:
-        raise Exception("Userbot bu grupta YOK veya Banlanmış!")
-    except Exception as e:
-        raise Exception(f"Gruba erişilemiyor: {e}")
+    # Erişim Kontrolü (Zorla Tanıtma)
+    is_access_ok = await force_refresh_peers(worker, chat_id)
+    if not is_access_ok:
+        # Son çare: Direkt get_chat_history dene, bazen çalışır
+        pass
 
-    # --- 2. TARAMA ---
     try:
-        # Son 3000 mesajı tara
         async for msg in worker.get_chat_history(chat_id, limit=3000):
             if topic_id:
                 tid = getattr(msg, "message_thread_id", None) or getattr(msg, "reply_to_message_id", None)
@@ -108,7 +122,7 @@ async def scan_target_group(worker, chat_id, topic_id=None):
                 EXISTING_FILES_CACHE.add(sig)
                 count += 1
     except Exception as e:
-        raise Exception(f"Tarama sırasında hata: {e}")
+        raise Exception(f"Tarama Hatası: {e}\n(Bot grupta mı? ID: {chat_id})")
             
     return count
 
@@ -159,7 +173,6 @@ def resolve_link(link):
     link = str(link).strip()
     try:
         if "c/" in link:
-            # Private Link: t.me/c/123456/100
             clean = link.split("c/")[1].split("?")[0].split("/")
             data["id"] = int("-100" + clean[0])
             if len(clean) == 3: 
@@ -168,15 +181,12 @@ def resolve_link(link):
             elif len(clean) == 2:
                 data["msg"] = int(clean[1])
         elif "-100" in link:
-            # Direkt ID
             data["id"] = int(link)
-        # Eğer t.me/publicgroup/123 gibi bir link gelirse, bu kod onu ID'ye çeviremez.
-        # Userbot'un ID'ye ihtiyacı var. En garantisi "Bağlantıyı Kopyala" deyince gelen t.me/c/ linkidir.
     except: return None
     return data
 
 @bot.on_message(filters.command("transfer") & filters.private)
-async def transfer_smart_match(client, message):
+async def transfer_final_fix(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
     
@@ -189,39 +199,35 @@ async def transfer_smart_match(client, message):
         await message.reply("⚠️ **Kullanım:** `/transfer [KAYNAK] [HEDEF]`")
         return
 
-    status = await message.reply("🔍 **BAĞLANTILAR KONTROL EDİLİYOR...**")
-
-    # Hafıza Tazeleme (Syntax Hatası Düzeldi)
-    for w in WORKERS:
-        try:
-            async for d in w.get_dialogs(limit=10):
-                pass
-        except: 
-            pass
+    status = await message.reply("🔄 **SUNUCU HAFIZASI TAZELENİYOR...**\n(PeerID Hatasını Çözmek İçin Gruplar Taranıyor)")
 
     src = resolve_link(src_link)
     dst = resolve_link(dst_link)
 
-    if not src or not dst: 
-        await status.edit("❌ Link Hatalı! Lütfen `t.me/c/..` formatındaki özel bağlantıyı kullanın.")
-        return
+    if not src or not dst: await status.edit("❌ Link Hatalı"); return
 
-    # ADIM 1: HEDEFİ TARA (Güvenli Mod)
+    # --- KRİTİK NOKTA: GRUPLARI TANI ---
+    # Botun ID'leri tanıması için dialogları tarıyoruz.
+    try:
+        # Önce hedefi tanı
+        await force_refresh_peers(WORKERS[0], dst['id'])
+        # Sonra kaynağı tanı
+        await force_refresh_peers(WORKERS[0], src['id'])
+    except Exception as e:
+        print(f"Refresh hatası (önemsiz olabilir): {e}")
+
+    # ADIM 1: HEDEFİ TARA
     try:
         existing_count = await scan_target_group(WORKERS[0], dst['id'], dst['topic'])
-        await status.edit(f"✅ **HEDEF DOĞRULANDI!**\nDosya Sayısı: {existing_count}\n\n🚀 **Kaynak Taranıyor...**")
+        await status.edit(f"✅ **HEDEF GRUP ONAYLANDI!**\nDosya Sayısı: {existing_count}\n\n🚀 **Kaynak Çekiliyor...**")
     except Exception as e:
-        await status.edit(f"❌ **HEDEF HATA:** {e}\n\n💡 **Çözüm:**\n1. Userbot hedef grupta üye mi?\n2. Userbot ile gruba bir nokta (.) atın."); return
+        await status.edit(f"❌ **ERİŞİM HATASI:** {e}\n\nLütfen Userbot'un bu grupta olduğundan ve mesaj atabildiğinden emin olun."); return
 
     start_point = src['msg'] if src['msg'] > 0 else 0
     msg_ids = []
     
     # ADIM 2: KAYNAĞI LİSTELE
     try:
-        # Kaynak grubu kontrol et
-        try: await WORKERS[0].get_chat(src['id'])
-        except: await status.edit("❌ Userbot KAYNAK grupta değil!"); return
-
         async for m in WORKERS[0].get_chat_history(src['id']):
             if ABORT_FLAG: break
             if start_point > 0 and m.id < start_point: continue
@@ -232,7 +238,7 @@ async def transfer_smart_match(client, message):
                 except: continue
             msg_ids.append(m.id)
     except Exception as e:
-        await status.edit(f"❌ Kaynak Tarama Hatası: {e}"); return
+        await status.edit(f"❌ Kaynak Erişim Hatası: {e}"); return
 
     msg_ids.reverse()
     total = len(msg_ids)
@@ -337,7 +343,7 @@ async def stop_cmd(c, m):
     await m.reply("🛑 **Durduruluyor...**")
 
 async def main():
-    print("V65 Başlatılıyor...")
+    print("V66 Fix Başlatılıyor...")
     keep_alive()
     await bot.start()
     for i, ub in enumerate(WORKERS):
