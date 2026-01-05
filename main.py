@@ -1,82 +1,87 @@
-from telethon import TelegramClient, events, types
+from telethon import TelegramClient, events
 import asyncio
-import sys
 
-# --- AYARLAR ---
-# Buraya kendi bilgilerini gir (Önceki konuşmalardan hatırla: API ID ve Hash'in sende var)
-API_ID = 30647156  
+# --- AYARLAR (Senin Bilgilerin) ---
+API_ID = 30647156
 API_HASH = "11d0174f807a8974a955520b8c968b4d"
-SESSION_NAME = 'user' 
-
-# Kaynak ve Hedef (Link veya ID olarak string girebilirsin)
-# Örnek: "https://t.me/kaynakkanal" veya "https://t.me/+AbCdEfGh..."
-SOURCE_LINK = input("Kaynak Kanal/Grup Linki veya ID'si: ")
-TARGET_LINK = input("Hedef Grup Linki veya ID'si: ")
+SESSION_NAME = 'user'
 
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
-async def main():
-    print("\n--- Userbot Başlatılıyor... ---")
-    await client.start()
-    
-    # 1. ADIM: HEDEF VE KAYNAĞI TANIMLAMA (PEER ID FIX)
-    try:
-        print(f"⏳ Kaynak çözümleniyor: {SOURCE_LINK}")
-        source_entity = await client.get_entity(SOURCE_LINK)
-        print(f"✅ Kaynak bulundu: {source_entity.title}")
+print("Userbot Aktif! Telegram'da Kayıtlı Mesajlar'a veya herhangi bir yere komutu yazabilirsin.")
+print("Komut formatı: .basla <KAYNAK_LINK> <HEDEF_LINK>")
 
-        print(f"⏳ Hedef çözümleniyor: {TARGET_LINK}")
-        target_entity = await client.get_entity(TARGET_LINK)
-        print(f"✅ Hedef bulundu: {target_entity.title}")
-    except Exception as e:
-        print(f"\n❌ HATA: Kanal/Grup bulunamadı! Linkleri kontrol et.")
-        print(f"Hata detayı: {e}")
-        print("İPUCU: Hedef gruba zaten üye olduğundan emin ol.")
+@client.on(events.NewMessage(pattern=r"^\.basla"))
+async def kopyalama_baslat(event):
+    # Komuttan linkleri ayıkla
+    args = event.message.text.split()
+    if len(args) != 3:
+        await event.edit("❌ **HATA:** Eksik bilgi.\nKullanım: `.basla https://t.me/kaynak https://t.me/hedef`")
         return
 
-    # İstatistik Sayaçları
-    total_count = 0
-    success_count = 0
-    error_count = 0
-    skipped_count = 0
+    source_url = args[1]
+    target_url = args[2]
 
-    print("\n--- Kopyalama İşlemi Başlıyor ---\n")
+    await event.edit(f"🔄 **Bağlantılar Çözümleniyor...**\nKaynak: {source_url}\nHedef: {target_url}")
 
-    # Mesajları tersten (eskiden yeniye) almak için 'reverse=True' kullanabilirsin.
-    # Şu anki ayar: En son mesajdan geriye doğru gider.
-    async for message in client.iter_messages(source_entity, limit=None):
-        total_count += 1
+    try:
+        # 1. ADIM: Entityleri zorla tanımla (PEER_ID_INVALID Çözümü)
+        # Link bir mesaj linki olsa bile (t.me/c/xxx/123) get_entity kanalı bulur.
+        source_entity = await client.get_entity(source_url)
+        target_entity = await client.get_entity(target_url)
         
-        # İlerleme durumunu ekrana bas (Her mesajda bir satır yazar)
-        sys.stdout.write(f"\rİşlenen Mesaj: {total_count} | Başarılı: {success_count} | Hatalı: {error_count}")
-        sys.stdout.flush()
+        await event.edit(f"✅ **Hedefler Bulundu!**\n📥 Kaynak: {source_entity.title}\n📤 Hedef: {target_entity.title}\n\n🚀 **İşlem Başlıyor...**")
+        await asyncio.sleep(2) # Okuman için bekleme
 
+    except Exception as e:
+        await event.edit(f"❌ **HATA: Kanal/Grup Bulunamadı!**\n\nDetay: `{str(e)}`\n\n⚠️ *Lütfen linklerin doğru olduğundan ve hedef gruba üye olduğundan emin ol.*")
+        return
+
+    # İstatistikler
+    total = 0
+    success = 0
+    error = 0
+    
+    # İlerleme çubuğu güncelleme sıklığı (Her 20 mesajda bir editler, yoksa Telegram engel atar)
+    UPDATE_INTERVAL = 20 
+
+    # Mesajları döngüye al (Eskiden yeniye veya tersten alabilirsin, şu an en son mesajdan geriye gider)
+    async for message in client.iter_messages(source_entity):
+        total += 1
+        
         try:
             if message.text or message.media:
-                # Mesajı hedefe gönder
                 await client.send_message(target_entity, message)
-                success_count += 1
-                
-                # Spam koruması için çok kısa bir bekleme (isteğe bağlı, kaldırırsan hızlanır ama risk artar)
-                await asyncio.sleep(0.5) 
-            else:
-                # Boş veya servis mesajıysa (örn: gruba biri katıldı mesajı)
-                skipped_count += 1
-
+                success += 1
+                # Spam koruması
+                await asyncio.sleep(0.5)
+            
         except Exception as e:
-            error_count += 1
-            # Hata detayını görmek istersen alt satırı aç:
-            # print(f"\n[!] Mesaj {message.id} kopyalanamadı: {e}")
-            continue
+            error += 1
+            # Hata durumunda (FloodWait vs) biraz daha uzun bekle
+            await asyncio.sleep(2)
 
-    print("\n\n" + "="*30)
-    print("      İŞLEM TAMAMLANDI")
-    print("="*30)
-    print(f"Toplam Taranan : {total_count}")
-    print(f"✅ Başarılı     : {success_count}")
-    print(f"❌ Hatalı       : {error_count}")
-    print(f"⏭️ Atlanan      : {skipped_count}")
-    print("="*30)
+        # Durum Güncellemesi (Her 20 mesajda bir)
+        if total % UPDATE_INTERVAL == 0:
+            status_text = (
+                f"🔄 **Kopyalama Sürüyor...**\n\n"
+                f"📊 **Toplam İşlenen:** `{total}`\n"
+                f"✅ **Başarılı:** `{success}`\n"
+                f"❌ **Hatalı:** `{error}`"
+            )
+            try:
+                await event.edit(status_text)
+            except:
+                pass # Edit hatası verirse (hız sınırı) işlemi durdurma, devam et.
 
-with client:
-    client.loop.run_until_complete(main())
+    # Bitiş Raporu
+    final_text = (
+        f"🏁 **İŞLEM TAMAMLANDI!**\n\n"
+        f"📊 **Toplam Taranan:** `{total}`\n"
+        f"✅ **Kopyalanan:** `{success}`\n"
+        f"❌ **Başarısız:** `{error}`"
+    )
+    await event.edit(final_text)
+
+client.start()
+client.run_until_disconnected()
