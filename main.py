@@ -9,7 +9,6 @@ from pyrogram.errors import FloodWait, FileReferenceExpired
 API_ID = int(os.environ.get("API_ID", "123456"))
 API_HASH = os.environ.get("API_HASH", "hash_buraya")
 SESSION1 = os.environ.get("SESSION1", "")
-SESSION2 = os.environ.get("SESSION2", "")
 
 # Loglama
 logging.basicConfig(level=logging.INFO)
@@ -201,3 +200,4 @@ async def start_services():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_services())
+
