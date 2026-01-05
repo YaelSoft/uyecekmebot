@@ -5,13 +5,13 @@ import time
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.errors import FloodWait
+from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelPrivate, ChannelInvalid
 
 # ==================== 1. WEB SERVER ====================
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "V64 FINAL STABLE ACTIVE! 🟢"
+def home(): return "V65 CONNECTION FIX ACTIVE! 🟢"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -48,17 +48,13 @@ if SESSION2:
 ABORT_FLAG = False
 
 # ==================== 3. HEDEF TARAYICI (DNA KONTROLÜ) ====================
-# Format: (DosyaBoyutu, VideoSüresi, DosyaAdı, CaptionHash)
 EXISTING_FILES_CACHE = set()
 
 def generate_signature(msg):
-    """
-    Yazısız videolarda bile benzersiz kimlik çıkarır.
-    """
+    """Dosya kimliği oluşturur (Boyut + Süre + İsim + Yazı)"""
     size = 0
     duration = 0
     file_name = "unknown"
-    # Yazı yoksa 0 döner, sorun yaratmaz.
     caption_hash = hash(msg.caption) if msg.caption else 0
     
     if msg.video:
@@ -78,31 +74,41 @@ def generate_signature(msg):
     elif msg.voice:
         size = msg.voice.file_size
     
-    # Sadece yazı ise
     if size == 0 and msg.text:
         return (0, 0, "text", hash(msg.text.strip()))
     
     if size == 0: return None
-    
-    # KİMLİK: Boyut + Süre + İsim + YazıHash
-    # Bu kombinasyonun aynısı varsa o video %99.99 kopyadır.
     return (size, duration, file_name, caption_hash)
 
 async def scan_target_group(worker, chat_id, topic_id=None):
-    """Hedef grubu tarar"""
+    """Hedef grubu tarar (Önce erişim kontrolü yapar)"""
     EXISTING_FILES_CACHE.clear()
     count = 0
     
-    # Son 3000 mesajı tara (Hız için limitli, istersen kaldır)
-    async for msg in worker.get_chat_history(chat_id, limit=3000):
-        if topic_id:
-            tid = getattr(msg, "message_thread_id", None) or getattr(msg, "reply_to_message_id", None)
-            if tid != topic_id and msg.id != topic_id: continue
-        
-        sig = generate_signature(msg)
-        if sig:
-            EXISTING_FILES_CACHE.add(sig)
-            count += 1
+    # --- 1. ERİŞİM KONTROLÜ (FIX BURASI) ---
+    try:
+        await worker.get_chat(chat_id)
+    except PeerIdInvalid:
+        raise Exception("Userbot bu ID'yi tanımıyor! Botu gruba ekleyip bir mesaj atın.")
+    except ChannelPrivate:
+        raise Exception("Userbot bu grupta YOK veya Banlanmış!")
+    except Exception as e:
+        raise Exception(f"Gruba erişilemiyor: {e}")
+
+    # --- 2. TARAMA ---
+    try:
+        # Son 3000 mesajı tara
+        async for msg in worker.get_chat_history(chat_id, limit=3000):
+            if topic_id:
+                tid = getattr(msg, "message_thread_id", None) or getattr(msg, "reply_to_message_id", None)
+                if tid != topic_id and msg.id != topic_id: continue
+            
+            sig = generate_signature(msg)
+            if sig:
+                EXISTING_FILES_CACHE.add(sig)
+                count += 1
+    except Exception as e:
+        raise Exception(f"Tarama sırasında hata: {e}")
             
     return count
 
@@ -153,6 +159,7 @@ def resolve_link(link):
     link = str(link).strip()
     try:
         if "c/" in link:
+            # Private Link: t.me/c/123456/100
             clean = link.split("c/")[1].split("?")[0].split("/")
             data["id"] = int("-100" + clean[0])
             if len(clean) == 3: 
@@ -161,7 +168,10 @@ def resolve_link(link):
             elif len(clean) == 2:
                 data["msg"] = int(clean[1])
         elif "-100" in link:
+            # Direkt ID
             data["id"] = int(link)
+        # Eğer t.me/publicgroup/123 gibi bir link gelirse, bu kod onu ID'ye çeviremez.
+        # Userbot'un ID'ye ihtiyacı var. En garantisi "Bağlantıyı Kopyala" deyince gelen t.me/c/ linkidir.
     except: return None
     return data
 
@@ -179,35 +189,39 @@ async def transfer_smart_match(client, message):
         await message.reply("⚠️ **Kullanım:** `/transfer [KAYNAK] [HEDEF]`")
         return
 
-    status = await message.reply("🔍 **HEDEF GRUP TARANIYOR...**\n(Aynı dosyaları atlamamak için detaylı kontrol yapılıyor)")
+    status = await message.reply("🔍 **BAĞLANTILAR KONTROL EDİLİYOR...**")
 
-    # --- SYNTAX HATASI DÜZELTİLDİ ---
+    # Hafıza Tazeleme (Syntax Hatası Düzeldi)
     for w in WORKERS:
         try:
-            # Hata veren yer burasıydı, alt alta yazınca düzelir.
             async for d in w.get_dialogs(limit=10):
                 pass
         except: 
             pass
-    # --------------------------------
 
     src = resolve_link(src_link)
     dst = resolve_link(dst_link)
 
-    if not src or not dst: await status.edit("❌ Link Hatalı"); return
+    if not src or not dst: 
+        await status.edit("❌ Link Hatalı! Lütfen `t.me/c/..` formatındaki özel bağlantıyı kullanın.")
+        return
 
-    # ADIM 1: HEDEFİ TARA
+    # ADIM 1: HEDEFİ TARA (Güvenli Mod)
     try:
         existing_count = await scan_target_group(WORKERS[0], dst['id'], dst['topic'])
-        await status.edit(f"✅ **HEDEFTE {existing_count} DOSYA VAR.**\nKopyalar atlanacak.\n\n🚀 **Kaynak Taranıyor...**")
+        await status.edit(f"✅ **HEDEF DOĞRULANDI!**\nDosya Sayısı: {existing_count}\n\n🚀 **Kaynak Taranıyor...**")
     except Exception as e:
-        await status.edit(f"❌ Hedef Tarama Hatası: {e}"); return
+        await status.edit(f"❌ **HEDEF HATA:** {e}\n\n💡 **Çözüm:**\n1. Userbot hedef grupta üye mi?\n2. Userbot ile gruba bir nokta (.) atın."); return
 
     start_point = src['msg'] if src['msg'] > 0 else 0
     msg_ids = []
     
     # ADIM 2: KAYNAĞI LİSTELE
     try:
+        # Kaynak grubu kontrol et
+        try: await WORKERS[0].get_chat(src['id'])
+        except: await status.edit("❌ Userbot KAYNAK grupta değil!"); return
+
         async for m in WORKERS[0].get_chat_history(src['id']):
             if ABORT_FLAG: break
             if start_point > 0 and m.id < start_point: continue
@@ -218,7 +232,7 @@ async def transfer_smart_match(client, message):
                 except: continue
             msg_ids.append(m.id)
     except Exception as e:
-        await status.edit(f"❌ Kaynak Liste Hatası: {e}"); return
+        await status.edit(f"❌ Kaynak Tarama Hatası: {e}"); return
 
     msg_ids.reverse()
     total = len(msg_ids)
@@ -236,7 +250,7 @@ async def transfer_smart_match(client, message):
             msg = await check_worker.get_messages(src['id'], msg_id)
             if not msg or msg.empty: continue
             
-            # PARMAK İZİ KONTROLÜ (Yazısız video olsa bile boyuttan yakalar)
+            # DNA KONTROLÜ
             sig = generate_signature(msg)
             
             if sig and sig in EXISTING_FILES_CACHE:
@@ -246,7 +260,6 @@ async def transfer_smart_match(client, message):
                     except: pass
                 continue 
             
-            # YOKSA İNDİR VE GÖNDER
             sent = False
             retry = 0
             
@@ -295,7 +308,7 @@ async def transfer_smart_match(client, message):
 
             if sent:
                 stats["success"] += 1
-                if sig: EXISTING_FILES_CACHE.add(sig) # Listeye ekle ki aynı döngüde tekrar atmasın
+                if sig: EXISTING_FILES_CACHE.add(sig)
             else:
                 if stats["skipped"] == 0: stats["failed"] += 1
 
@@ -311,7 +324,7 @@ async def transfer_smart_match(client, message):
             stats["failed"] += 1
 
     await status.edit(
-        f"🏁 **İŞLEM TAMAMLANDI!**\n"
+        f"🏁 **TAMAMLANDI!**\n"
         f"✅ Yeni Atılan: {stats['success']}\n"
         f"⏩ Zaten Vardı: {stats['skipped']}\n"
         f"❌ Hata: {stats['failed']}"
@@ -324,7 +337,7 @@ async def stop_cmd(c, m):
     await m.reply("🛑 **Durduruluyor...**")
 
 async def main():
-    print("V64 Başlatılıyor...")
+    print("V65 Başlatılıyor...")
     keep_alive()
     await bot.start()
     for i, ub in enumerate(WORKERS):
