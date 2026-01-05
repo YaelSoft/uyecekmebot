@@ -12,7 +12,7 @@ from pyrogram.errors import FloodWait, PeerIdInvalid
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "Turbo Manager Active! ⚡"
+def home(): return "Turbo Manager Active! 🟢"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -40,19 +40,17 @@ if SESSION2: USERBOTS.append(Client("ub2", api_id=API_ID, api_hash=API_HASH, ses
 
 ABORT_FLAG = False
 
-# ==================== 3. HAFIZA SİSTEMİ (GEÇMİŞİ HATIRLA) ====================
+# ==================== 3. HAFIZA SİSTEMİ (SQL) ====================
 DB_NAME = "transfer_history.db"
 
 def init_history_db():
     conn = sqlite3.connect(DB_NAME)
-    # Tablo: KaynakGrup, KaynakMesajID, HedefGrup
     conn.cursor().execute('''CREATE TABLE IF NOT EXISTS history 
                              (src_id INTEGER, msg_id INTEGER, dst_id INTEGER, 
                              PRIMARY KEY (src_id, msg_id, dst_id))''')
     conn.commit(); conn.close()
 
 def is_already_sent(src_id, msg_id, dst_id):
-    """Bu mesaj daha önce bu hedefe atıldı mı?"""
     conn = sqlite3.connect(DB_NAME)
     res = conn.cursor().execute("SELECT 1 FROM history WHERE src_id=? AND msg_id=? AND dst_id=?", 
                                 (src_id, msg_id, dst_id)).fetchone()
@@ -60,7 +58,6 @@ def is_already_sent(src_id, msg_id, dst_id):
     return bool(res)
 
 def mark_as_sent(src_id, msg_id, dst_id):
-    """Mesajı 'atıldı' olarak işaretle"""
     conn = sqlite3.connect(DB_NAME)
     try: conn.cursor().execute("INSERT INTO history VALUES (?, ?, ?)", (src_id, msg_id, dst_id))
     except: pass
@@ -83,7 +80,6 @@ async def download_with_verification(ub, msg, retries=3):
             file_path = await ub.download_media(msg)
             if file_path and os.path.exists(file_path):
                 actual_size = os.path.getsize(file_path)
-                # 1KB tolerans
                 if actual_size >= expected_size or (expected_size - actual_size) < 1024:
                     return file_path
                 else:
@@ -93,7 +89,7 @@ async def download_with_verification(ub, msg, retries=3):
         await asyncio.sleep(1)
     return None
 
-# ==================== 5. ANA TRANSFER KOMUTU (V47) ====================
+# ==================== 5. ANA TRANSFER KOMUTU ====================
 def resolve_link(link):
     data = {"id": None, "topic": None, "msg": 0}
     link = str(link).strip()
@@ -119,11 +115,9 @@ async def transfer_turbo(client, message):
     if not USERBOTS: await message.reply("❌ Userbot Yok!"); return
     ub = USERBOTS[0]
     
-    # 🔥 TURBO MOD: Hız artırıldı, flood yerse bekler
     SAFETY_DELAY = 1 
 
     try:
-        # Linkleri Al (Topic veya Normal fark etmez)
         src_link = message.command[1]
         dst_link = message.command[2]
     except:
@@ -132,30 +126,31 @@ async def transfer_turbo(client, message):
 
     status = await message.reply("⚡ **TURBO ANALİZ BAŞLADI...**")
 
-    # Hafıza Tazele
-    try: async for d in ub.get_dialogs(limit=20): pass
-    except: pass
+    # --- DÜZELTİLEN KISIM BURASI (INDENTATION FIX) ---
+    try:
+        # Tek satırda yazınca hata veriyordu, açtık.
+        async for d in ub.get_dialogs(limit=20):
+            pass
+    except: 
+        pass
+    # -------------------------------------------------
 
     src = resolve_link(src_link)
     dst = resolve_link(dst_link)
 
     if not src or not dst: await status.edit("❌ Link Hatalı"); return
 
-    # Başlangıç Mesajı (Linkte verilenden başla)
     start_point = src['msg'] if src['msg'] > 0 else 0
     
     await status.edit(f"📦 **LİSTE HAZIRLANIYOR...**\nVeritabanı kontrol ediliyor...")
 
     msg_ids = []
     try:
-        # Tüm geçmişi çek
         async for m in ub.get_chat_history(src['id']):
             if ABORT_FLAG: break
             
-            # 1. Başlangıç Filtresi (Eskileri alma)
             if start_point > 0 and m.id < start_point: continue
 
-            # 2. Topic Filtresi
             if src['topic']:
                 try:
                     tid = getattr(m, "message_thread_id", None) or getattr(m, "reply_to_message_id", None)
@@ -166,34 +161,31 @@ async def transfer_turbo(client, message):
     except Exception as e:
         await status.edit(f"❌ Liste Hatası: {e}"); return
 
-    msg_ids.reverse() # Eskiden yeniye
+    msg_ids.reverse()
     total = len(msg_ids)
     
     if total == 0: await status.edit("❌ Mesaj bulunamadı."); return
 
     await status.edit(f"🚀 **TURBO AKTARIM BAŞLADI**\nToplam Hedef: {total}")
 
-    # İSTATİSTİKLER
     stats = {"success": 0, "skipped": 0, "failed": 0}
 
     for msg_id in msg_ids:
         if ABORT_FLAG: await status.edit("🛑 **Durduruldu.**"); return
         
-        # --- 1. HAFIZA KONTROLÜ (BU HIZLANDIRIR) ---
+        # HAFIZA KONTROLÜ
         if is_already_sent(src['id'], msg_id, dst['id']):
             stats["skipped"] += 1
-            # Her 50 atlamada bir bilgi ver (Hızlı geçiş için sık güncelleme)
             if stats["skipped"] % 50 == 0:
                 try: await status.edit(
-                    f"♻️ **HIZLI GEÇİŞ (ATLANİYOR)...**\n"
+                    f"♻️ **HIZLI GEÇİŞ...**\n"
                     f"✅ Başarılı: {stats['success']}\n"
-                    f"⏭️ Önceden Atılan: {stats['skipped']}\n"
+                    f"⏭️ Atlanan: {stats['skipped']}\n"
                     f"📉 Kalan: {total - (stats['success'] + stats['skipped'])}"
                 )
                 except: pass
-            continue # Döngünün başına dön, sonraki mesaja geç
+            continue
 
-        # --- 2. GÖNDERİM ---
         try:
             msg = await ub.get_messages(src['id'], msg_id)
             if not msg or msg.empty: continue
@@ -217,7 +209,6 @@ async def transfer_turbo(client, message):
                         elif msg.voice: await ub.send_voice(dst['id'], path, **send_args)
                         elif msg.sticker: await ub.send_sticker(dst['id'], path, **send_args)
                         elif msg.animation: await ub.send_animation(dst['id'], path, caption=caption, **send_args)
-                        
                         success = True
                     except: stats["failed"] += 1
                     finally: os.remove(path)
@@ -229,38 +220,28 @@ async def transfer_turbo(client, message):
                     success = True
                 except: stats["failed"] += 1
 
-            # --- SONUÇ İŞLEME ---
             if success: 
                 stats["success"] += 1
-                # Başarılıysa veritabanına kaydet
                 mark_as_sent(src['id'], msg_id, dst['id'])
             
-            # Bekleme
             await asyncio.sleep(SAFETY_DELAY)
             
-            # Detaylı Rapor (Her 5 işlemde bir)
             if (stats["success"] + stats["failed"]) % 5 == 0:
                 try: await status.edit(
-                    f"📊 **DETAYLI DURUM**\n\n"
-                    f"✅ **Atılan:** {stats['success']}\n"
-                    f"♻️ **Atlanan (Eski):** {stats['skipped']}\n"
-                    f"❌ **Hata:** {stats['failed']}\n"
-                    f"📉 **Kalan:** {total - (stats['success'] + stats['skipped'] + stats['failed'])}"
+                    f"📊 **DURUM**\n"
+                    f"✅: {stats['success']} | ♻️: {stats['skipped']} | ❌: {stats['failed']}\n"
+                    f"📉 Kalan: {total - (stats['success'] + stats['skipped'] + stats['failed'])}"
                 )
                 except: pass
 
         except FloodWait as e:
-            # Hız sınırına takılırsak bekle, ama durma
-            print(f"Hız Limiti: {e.value} saniye bekleniyor...")
             await asyncio.sleep(e.value + 5)
         except Exception as e:
             stats["failed"] += 1
 
     await status.edit(
-        f"🏁 **İŞLEM TAMAMLANDI!**\n\n"
-        f"✅ Toplam Atılan: {stats['success']}\n"
-        f"♻️ Önceden Vardı: {stats['skipped']}\n"
-        f"❌ Başarısız: {stats['failed']}"
+        f"🏁 **TAMAMLANDI!**\n"
+        f"✅: {stats['success']} | ♻️: {stats['skipped']} | ❌: {stats['failed']}"
     )
 
 @bot.on_message(filters.command("iptal") & filters.private)
