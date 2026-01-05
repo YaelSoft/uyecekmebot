@@ -11,7 +11,7 @@ from pyrogram.errors import FloodWait
 app = Flask(__name__)
 
 @app.route('/')
-def home(): return "V62 TARGET SCANNER ACTIVE! 📡"
+def home(): return "V64 FINAL STABLE ACTIVE! 🟢"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -47,47 +47,55 @@ if SESSION2:
 
 ABORT_FLAG = False
 
-# ==================== 3. HEDEF TARAYICI (BEYİN BURASI) ====================
-# Bu liste, hedef gruptaki dosyaların "Parmak İzlerini" tutacak.
-# Format: (DosyaBoyutu, VideoSüresi)
+# ==================== 3. HEDEF TARAYICI (DNA KONTROLÜ) ====================
+# Format: (DosyaBoyutu, VideoSüresi, DosyaAdı, CaptionHash)
 EXISTING_FILES_CACHE = set()
 
 def generate_signature(msg):
-    """Mesajın kimliğini (imzasını) çıkarır"""
+    """
+    Yazısız videolarda bile benzersiz kimlik çıkarır.
+    """
     size = 0
     duration = 0
+    file_name = "unknown"
+    # Yazı yoksa 0 döner, sorun yaratmaz.
+    caption_hash = hash(msg.caption) if msg.caption else 0
     
     if msg.video:
         size = msg.video.file_size
         duration = msg.video.duration
+        file_name = msg.video.file_name or "vid"
     elif msg.document:
         size = msg.document.file_size
-        # Dokümanda süre olmayabilir
+        file_name = msg.document.file_name or "doc"
     elif msg.photo:
         size = msg.photo.file_size
+        file_name = "photo" 
     elif msg.audio:
         size = msg.audio.file_size
         duration = msg.audio.duration
+        file_name = msg.audio.file_name or "audio"
     elif msg.voice:
         size = msg.voice.file_size
     
-    # Eğer dosya boyutu 0 ise (sadece yazıysa) metnin hash'ini al
+    # Sadece yazı ise
     if size == 0 and msg.text:
-        return hash(msg.text.strip())
+        return (0, 0, "text", hash(msg.text.strip()))
     
     if size == 0: return None
     
-    # İmza: Boyut + Süre (Bu ikisi aynıysa %99 aynı dosyadır)
-    return (size, duration)
+    # KİMLİK: Boyut + Süre + İsim + YazıHash
+    # Bu kombinasyonun aynısı varsa o video %99.99 kopyadır.
+    return (size, duration, file_name, caption_hash)
 
 async def scan_target_group(worker, chat_id, topic_id=None):
-    """Hedef grubu tarar ve nelerin atıldığını hafızaya alır"""
+    """Hedef grubu tarar"""
     EXISTING_FILES_CACHE.clear()
     count = 0
     
-    async for msg in worker.get_chat_history(chat_id):
+    # Son 3000 mesajı tara (Hız için limitli, istersen kaldır)
+    async for msg in worker.get_chat_history(chat_id, limit=3000):
         if topic_id:
-            # Topic kontrolü
             tid = getattr(msg, "message_thread_id", None) or getattr(msg, "reply_to_message_id", None)
             if tid != topic_id and msg.id != topic_id: continue
         
@@ -104,20 +112,14 @@ async def get_best_worker():
         now = time.time()
         best_idx = -1
         min_wait = float('inf')
-
         for idx, release_time in WORKER_STATUS.items():
-            if now >= release_time:
-                return WORKERS[idx], idx
+            if now >= release_time: return WORKERS[idx], idx
             else:
                 wait = release_time - now
-                if wait < min_wait:
-                    min_wait = wait
-                    best_idx = idx
+                if wait < min_wait: min_wait = wait; best_idx = idx
         
-        if best_idx != -1:
-            await asyncio.sleep(min_wait)
-        else:
-            return None, -1
+        if best_idx != -1: await asyncio.sleep(min_wait)
+        else: return None, -1
 
 def report_flood(idx, seconds):
     WORKER_STATUS[idx] = time.time() + seconds + 2
@@ -129,7 +131,6 @@ async def download_with_verification(ub, msg, retries=3):
     if msg.video: expected_size = msg.video.file_size
     elif msg.document: expected_size = msg.document.file_size
     elif msg.photo: expected_size = msg.photo.file_size
-    
     if expected_size == 0: return None
 
     file_path = None
@@ -178,30 +179,34 @@ async def transfer_smart_match(client, message):
         await message.reply("⚠️ **Kullanım:** `/transfer [KAYNAK] [HEDEF]`")
         return
 
-    status = await message.reply("📡 **HEDEF GRUP ANALİZ EDİLİYOR...**\n(Bu işlem 'Zaten Atılanları' bulmak için yapılır, biraz sürebilir)")
+    status = await message.reply("🔍 **HEDEF GRUP TARANIYOR...**\n(Aynı dosyaları atlamamak için detaylı kontrol yapılıyor)")
 
-    # Botları ısıt
+    # --- SYNTAX HATASI DÜZELTİLDİ ---
     for w in WORKERS:
-        try: async for d in w.get_dialogs(limit=10): pass
-        except: pass
+        try:
+            # Hata veren yer burasıydı, alt alta yazınca düzelir.
+            async for d in w.get_dialogs(limit=10):
+                pass
+        except: 
+            pass
+    # --------------------------------
 
     src = resolve_link(src_link)
     dst = resolve_link(dst_link)
 
     if not src or not dst: await status.edit("❌ Link Hatalı"); return
 
-    # --- ADIM 1: HEDEFİ TARA ---
+    # ADIM 1: HEDEFİ TARA
     try:
-        # 1. Botu kullanarak hedefi tarıyoruz
         existing_count = await scan_target_group(WORKERS[0], dst['id'], dst['topic'])
-        await status.edit(f"✅ **ANALİZ TAMAM!**\nHedef grupta {existing_count} adet dosya tespit edildi.\n\n🚀 **Kaynak Taranıyor...**")
+        await status.edit(f"✅ **HEDEFTE {existing_count} DOSYA VAR.**\nKopyalar atlanacak.\n\n🚀 **Kaynak Taranıyor...**")
     except Exception as e:
-        await status.edit(f"❌ Hedef Tarama Hatası: {e}\nBot hedef grupta mı?"); return
+        await status.edit(f"❌ Hedef Tarama Hatası: {e}"); return
 
     start_point = src['msg'] if src['msg'] > 0 else 0
     msg_ids = []
     
-    # --- ADIM 2: KAYNAĞI LİSTELE ---
+    # ADIM 2: KAYNAĞI LİSTELE
     try:
         async for m in WORKERS[0].get_chat_history(src['id']):
             if ABORT_FLAG: break
@@ -218,31 +223,28 @@ async def transfer_smart_match(client, message):
     msg_ids.reverse()
     total = len(msg_ids)
 
-    await status.edit(f"🏎️ **TRANSFER BAŞLADI**\nKaynak: {total} Mesaj\nHedefteki Mevcut: {existing_count}")
+    await status.edit(f"🏎️ **TRANSFER BAŞLADI**\nKaynak: {total} Mesaj")
 
     stats = {"success": 0, "skipped": 0, "failed": 0}
 
-    # --- ADIM 3: AKILLI AKTARIM ---
+    # ADIM 3: AKILLI AKTARIM
     for msg_id in msg_ids:
         if ABORT_FLAG: await status.edit("🛑 **Durduruldu.**"); return
         
-        # Sırada hangi mesaj var, onu çekelim (Sadece Metadata)
-        # Hangi bot müsaitse o baksın
         check_worker, _ = await get_best_worker()
         try:
             msg = await check_worker.get_messages(src['id'], msg_id)
             if not msg or msg.empty: continue
             
-            # --- KRİTİK EŞLEŞTİRME KONTROLÜ ---
+            # PARMAK İZİ KONTROLÜ (Yazısız video olsa bile boyuttan yakalar)
             sig = generate_signature(msg)
             
             if sig and sig in EXISTING_FILES_CACHE:
-                # ZATEN VAR!
                 stats["skipped"] += 1
-                if stats["skipped"] % 100 == 0:
-                    try: await status.edit(f"⏩ **ZATEN VAR (GEÇİLİYOR)...**\nAtlanan: {stats['skipped']}")
+                if stats["skipped"] % 50 == 0:
+                    try: await status.edit(f"⏩ **GEÇİLİYOR...**\nAtlanan: {stats['skipped']}")
                     except: pass
-                continue # İndirme yapma, direkt diğer mesaja geç!
+                continue 
             
             # YOKSA İNDİR VE GÖNDER
             sent = False
@@ -253,10 +255,6 @@ async def transfer_smart_match(client, message):
                 worker, w_idx = await get_best_worker()
                 
                 try:
-                    # Mesajı tekrar çek (Taze session ile)
-                    # (Yukarıda sadece kontrol için çekmiştik, şimdi işlem için çekiyoruz)
-                    # Performans için: Eğer check_worker ile worker aynıysa tekrar çekmeye gerek yok ama garanti olsun.
-                    
                     send_args = {}
                     if dst['topic']: send_args["reply_to_message_id"] = dst['topic']
                     
@@ -297,8 +295,7 @@ async def transfer_smart_match(client, message):
 
             if sent:
                 stats["success"] += 1
-                # Başarılı atılanı da hafızaya ekle ki aynı döngüde tekrar atmasın
-                if sig: EXISTING_FILES_CACHE.add(sig)
+                if sig: EXISTING_FILES_CACHE.add(sig) # Listeye ekle ki aynı döngüde tekrar atmasın
             else:
                 if stats["skipped"] == 0: stats["failed"] += 1
 
@@ -311,7 +308,6 @@ async def transfer_smart_match(client, message):
                 except: pass
 
         except Exception as e:
-            # Mesajı çekemezse (Silinmiş vs.)
             stats["failed"] += 1
 
     await status.edit(
@@ -327,9 +323,8 @@ async def stop_cmd(c, m):
     ABORT_FLAG = True
     await m.reply("🛑 **Durduruluyor...**")
 
-# ==================== 7. BAŞLATMA ====================
 async def main():
-    print("V62 Target Scanner Başlatılıyor...")
+    print("V64 Başlatılıyor...")
     keep_alive()
     await bot.start()
     for i, ub in enumerate(WORKERS):
