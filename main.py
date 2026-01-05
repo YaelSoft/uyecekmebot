@@ -2,8 +2,8 @@ import os
 import asyncio
 import logging
 from quart import Quart
-from pyrogram import Client, filters
-from pyrogram.errors import FloodWait
+from pyrogram import Client, filters, enums
+from pyrogram.errors import FloodWait, ChatWriteForbidden, ChatAdminRequired, UserBannedInChannel
 
 # ==================== AYARLAR ====================
 API_ID = int(os.environ.get("API_ID", "123456"))
@@ -11,15 +11,13 @@ API_HASH = os.environ.get("API_HASH", "")
 SESSION1 = os.environ.get("SESSION1", "")
 SESSION2 = os.environ.get("SESSION2", "")
 
-# Loglama
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("RenderBot")
 
 app_web = Quart(__name__)
 
 @app_web.route('/')
-async def hello():
-    return "🔥 V103 Yayında!"
+async def hello(): return "🔥 V104 Hazır!"
 
 # ==================== BOTLAR ====================
 clients = []
@@ -30,35 +28,22 @@ if not clients: exit()
 bot = clients[0]
 user_state = {} 
 
-# ==================== YENİLENMİŞ LİNK ÇÖZÜCÜ ====================
+# ==================== LİNK ÇÖZÜCÜ ====================
 def resolve_link(link):
-    """Link formatını akıllıca analiz eder"""
     data = {"id": None, "topic": None, "msg": 0}
     try:
-        # Link temizliği
         clean_link = link.strip().split("?")[0]
-        
         if "t.me/c/" in clean_link:
             parts = clean_link.split("t.me/c/")[1].split("/")
-            
-            # Chat ID (Her zaman ilk parça)
-            # Eğer ID zaten -100 ile başlamıyorsa ekle
-            chat_id_str = parts[0]
-            data["id"] = int("-100" + chat_id_str)
+            data["id"] = int("-100" + parts[0])
             
             if len(parts) == 2: 
-                # Format: t.me/c/CHAT_ID/MSG_ID
                 data["msg"] = int(parts[1])
-                
             elif len(parts) == 3: 
-                # Format: t.me/c/CHAT_ID/TOPIC_ID/MSG_ID
                 data["topic"] = int(parts[1])
                 data["msg"] = int(parts[2])
-                
         else: return None
-    except Exception as e:
-        logger.error(f"Link Hatası: {e}")
-        return None
+    except: return None
     return data
 
 async def download_and_upload(worker, message, target_chat_id, target_topic):
@@ -70,22 +55,16 @@ async def download_and_upload(worker, message, target_chat_id, target_topic):
         caption = message.caption or ""
         kwargs = {"reply_to_message_id": target_topic} if target_topic else {}
 
-        if message.video:
-            await worker.send_video(target_chat_id, file_path, caption=caption, **kwargs)
-        elif message.photo:
-            await worker.send_photo(target_chat_id, file_path, caption=caption, **kwargs)
-        elif message.document:
-            await worker.send_document(target_chat_id, file_path, caption=caption, **kwargs)
-        elif message.text:
-            await worker.send_message(target_chat_id, message.text, **kwargs)
+        if message.video: await worker.send_video(target_chat_id, file_path, caption=caption, **kwargs)
+        elif message.photo: await worker.send_photo(target_chat_id, file_path, caption=caption, **kwargs)
+        elif message.document: await worker.send_document(target_chat_id, file_path, caption=caption, **kwargs)
+        elif message.text: await worker.send_message(target_chat_id, message.text, **kwargs)
             
         return True
     except FloodWait as e:
-        logger.warning(f"Flood: {e.value}")
         await asyncio.sleep(e.value)
         return False
     except Exception as e:
-        logger.error(f"İşlem Hatası: {e}")
         return False
     finally:
         if file_path and os.path.exists(file_path): os.remove(file_path)
@@ -95,7 +74,7 @@ async def download_and_upload(worker, message, target_chat_id, target_topic):
 @bot.on_message(filters.command("basla") & filters.me)
 async def start_command(client, message):
     user_state[message.from_user.id] = {"step": "wait_src", "data": {}, "stop": False}
-    await message.reply_text("🕵️‍♂️ **TANI MODU AKTİF**\n\nBaşlamak için **KAYNAK** mesajın linkini at.\n(Ben de doğru anlayıp anlamadığımı söyleyeceğim).")
+    await message.reply_text("🕵️‍♂️ **HATA BULUCU MODU**\n\nÖnce **KAYNAK** mesajın linkini at.")
 
 @bot.on_message(filters.command("dur") & filters.me)
 async def stop_command(client, message):
@@ -108,62 +87,75 @@ async def message_handler(client, message):
     uid = message.from_user.id
     state = user_state.get(uid, {}).get("step", "idle")
 
-    # 1. KAYNAK
+    # 1. KAYNAK AL
     if state == "wait_src":
         link_data = resolve_link(message.text)
         if not link_data:
-            await message.reply_text("❌ Linki çözemedim! Format `https://t.me/c/...` olmalı.")
+            await message.reply_text("❌ Link Hatalı!")
             return
-        
-        # TANI RAPORU (DEBUG)
-        debug_msg = (
-            f"✅ **KAYNAK ANALİZİ:**\n"
-            f"🆔 Grup ID: `{link_data['id']}`\n"
-            f"🔢 Başlangıç Mesajı: `{link_data['msg']}`\n"
-            f"📂 Topic ID: `{link_data['topic']}` (Varsa)\n\n"
-            f"Şimdi **HEDEF** topic linkini at."
-        )
         
         user_state[uid]["data"]["src"] = link_data
         user_state[uid]["step"] = "wait_dst"
-        await message.reply_text(debug_msg)
+        await message.reply_text(f"✅ Kaynak OK.\n\n👉 Şimdi **HEDEF** topic linkini at.\n(Dikkat: Hedefe test mesajı atıp sileceğim).")
 
-    # 2. HEDEF
+    # 2. HEDEF AL VE TEST ET (ÖNEMLİ KISIM)
     elif state == "wait_dst":
         link_data = resolve_link(message.text)
         if not link_data:
-            await message.reply_text("❌ Hedef Linki Hatalı!")
+            await message.reply_text("❌ Hedef Link Hatalı!")
             return
         
+        target_id = link_data['id']
+        topic_id = link_data['topic']
+        
+        status_msg = await message.reply_text("🔌 **HEDEF GRUBA BAĞLANTI TEST EDİLİYOR...**")
+        
+        # --- TEST AŞAMASI ---
+        try:
+            # 1. Grubu Görebiliyor muyuz?
+            chat = await client.get_chat(target_id)
+            chat_title = chat.title
+            
+            # 2. Mesaj Atabiliyor muyuz? (Test Mesajı)
+            kwargs = {"reply_to_message_id": topic_id} if topic_id else {}
+            sent_msg = await client.send_message(target_id, "🤖 Bağlantı Testi (Bu mesaj silinecek)", **kwargs)
+            
+            # 3. Başarılıysa sil
+            await sent_msg.delete()
+            
+            await status_msg.edit_text(f"✅ **BAĞLANTI BAŞARILI!**\n\nGrup: `{chat_title}`\nDurum: Mesaj atılabiliyor.\n\n🚀 **TRANSFER BAŞLIYOR...**")
+            
+        except ChatWriteForbidden:
+            await status_msg.edit_text(f"❌ **YETKİ YOK!**\nBu gruba mesaj atma iznin kapalı. (Admin engellemiş veya sadece okuma modu).")
+            return
+        except ChatAdminRequired:
+            await status_msg.edit_text(f"❌ **ADMİN YETKİSİ LAZIM!**\nBurası bir Kanal veya özel grup, mesaj atabilmek için Admin olmalısın.")
+            return
+        except UserBannedInChannel:
+            await status_msg.edit_text(f"❌ **BANLISIN!**\nBu gruptan banlanmışsın veya kısıtlanmışsın.")
+            return
+        except Exception as e:
+            await status_msg.edit_text(f"❌ **ERİŞİM HATASI!**\nBot bu grubu göremiyor.\n\n**Olası Sebepler:**\n1. Bot (Senin Hesap) bu grupta üye değil.\n2. ID yanlış (-100 ile başlamalı).\n3. İnternet hatası.\n\nTelegram Hata Kodu: `{e}`")
+            return
+        
+        # TESTİ GEÇTİYSE DEVAM ET
         user_state[uid]["data"]["dst"] = link_data
         user_state[uid]["step"] = "running"
         user_state[uid]["stop"] = False
         
         src = user_state[uid]["data"]["src"]
         
-        # ERİŞİM TESTİ
-        await message.reply_text("🔌 **Erişim Testi Yapılıyor...**\n(Eğer burada takılırsa bot o grupta değildir)")
-        try:
-            test_msg = await client.get_messages(src['id'], src['msg'])
-            if not test_msg or test_msg.empty:
-                await message.reply_text(f"⚠️ **UYARI:** {src['msg']} numaralı mesaj BOŞ veya SİLİNMİŞ görünüyor!\nİşlem yine de başlatılıyor...")
-            else:
-                await message.reply_text(f"✅ **Erişim Başarılı!**\nMesaj Türü: `{test_msg.media if test_msg.media else 'Metin'}`\n\n🚀 **BAŞLIYORUZ!**")
-        except Exception as e:
-            await message.reply_text(f"❌ **ERİŞİM HATASI:**\nBot kaynak gruba erişemiyor!\nSebep: `{e}`")
-            return
+        asyncio.create_task(run_transfer(client, uid, src, link_data, message))
 
-        asyncio.create_task(run_transfer(client, uid, user_state[uid]["data"]["src"], user_state[uid]["data"]["dst"], message))
-
-# ==================== MOTOR ====================
+# ==================== TRANSFER MOTORU ====================
 async def run_transfer(main_client, uid, src, dst, status_msg):
     current_id = src['msg']
-    empty_streak = 0
+    error_count = 0
     worker_index = 0
     
     while True:
         if user_state.get(uid, {}).get("stop", False):
-            await status_msg.reply_text("🛑 İşlem Durduruldu.")
+            await status_msg.reply_text("🛑 Durduruldu.")
             user_state[uid]["step"] = "idle"
             break
 
@@ -171,7 +163,7 @@ async def run_transfer(main_client, uid, src, dst, status_msg):
         worker_index += 1
         
         try:
-            # Mesajı Çek
+            # Kaynak Mesajı Çek
             msg = None
             try:
                 msg = await worker.get_messages(src['id'], current_id)
@@ -180,36 +172,26 @@ async def run_transfer(main_client, uid, src, dst, status_msg):
                 msg = await worker.get_messages(src['id'], current_id)
             except: pass
 
-            # BOŞLUK KONTROLÜ (Hemen pes etme)
             if msg is None or msg.empty:
-                empty_streak += 1
-                
-                # Sadece her 50 boşlukta bir bilgi ver
-                if empty_streak % 50 == 0:
-                    await status_msg.edit_text(f"⚠️ **Boşluk Taranıyor:** `{current_id}`\n(Arka arkaya {empty_streak} boş mesaj)")
-                
-                # 500 Mesaj boyunca bomboşsa dur (Eskiden 50 idi, artırdım)
-                if empty_streak > 500:
-                    await status_msg.reply_text(f"🏁 **Tamamlandı!**\nSon taranan ID: `{current_id}`\n(500 mesajdır veri yok, sonuna gelindi).")
+                error_count += 1
+                if error_count > 500:
+                    await status_msg.reply_text(f"🏁 **Bitti!** Son ID: `{current_id}`")
                     break
-                
                 current_id += 1
                 continue
             
-            empty_streak = 0 # Mesaj bulduk, sayacı sıfırla
+            error_count = 0
 
             if msg.media or msg.text:
-                # Durum güncellemesi (Her mesajda değil, 5'te bir yap ki spam olmasın)
                 if current_id % 5 == 0:
                     try: await status_msg.edit_text(f"🔄 **İşleniyor:** `{current_id}`")
                     except: pass
                 
+                # Hedefe Yükle (Testi zaten geçtik, burası çalışmalı)
                 success = await download_and_upload(worker, msg, dst['id'], dst['topic'])
                 
                 if success: await asyncio.sleep(2) 
-                else:
-                    await asyncio.sleep(5)
-                    # Başarısızsa atla ve devam et (Takılı kalmasın)
+                else: await asyncio.sleep(5)
                     
             current_id += 1
 
