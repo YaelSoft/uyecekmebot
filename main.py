@@ -20,7 +20,7 @@ logger = logging.getLogger("YaelSaver")
 # Web Server
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot Aktif! 🟢"
+def home(): return "Bot Aktif! Derin Arama Modu 🟢"
 def run_web(): port = int(os.environ.get("PORT", 8080)); app.run(host="0.0.0.0", port=port)
 def keep_alive(): t = Thread(target=run_web); t.daemon = True; t.start()
 
@@ -29,56 +29,35 @@ bot = Client("saver_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN,
 userbot = Client("userbot", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
 
 ABORT_FLAG = False
+FOUND_CHATS_CACHE = {} # Bulunan grupları hafızada tutmak için
 
-# ==================== AKILLI KANAL BULUCU (LINK GEREKTİRMEZ) ====================
+# ==================== YARDIMCI FONKSİYONLAR ====================
 
-async def smart_find_chat(target_id_str):
-    """
-    Kullanıcının verdiği ID (örn: 1555999) ile Userbot'un listesindeki
-    ID'leri (-1001555999) karşılaştırır. Eşleşirse Chat objesini döner.
-    """
-    target_clean = str(target_id_str).replace("-100", "").replace("-", "")
-    
-    logger.info(f"🔍 Kanal aranıyor... Hedef ID (Temiz): {target_clean}")
-    
-    # Userbot'un tüm sohbetlerini gez
-    async for dialog in userbot.get_dialogs():
-        current_id = str(dialog.chat.id)
-        current_clean = current_id.replace("-100", "").replace("-", "")
-        
-        # 1. ID Numarası Tutuyor mu?
-        if current_clean == target_clean:
-            logger.info(f"✅ BULUNDU! ID Eşleşti: {dialog.chat.title}")
-            return dialog.chat
-            
-        # 2. Username Tutuyor mu? (Eğer ID string ise)
-        if dialog.chat.username and str(target_id_str).replace("@","").lower() == dialog.chat.username.lower():
-            logger.info(f"✅ BULUNDU! Username Eşleşti: {dialog.chat.title}")
-            return dialog.chat
-
-    logger.error("❌ Eşleşme bulunamadı.")
-    return None
-
-def resolve_link(link):
-    data = {"id": None, "msg_id": None, "topic_id": None}
-    link = str(link).strip().replace("https://", "").replace("http://", "").replace("t.me/", "")
-    parts = link.split("/")
-    
+def resolve_link_id(link):
+    """Linkten sadece ID'yi çeker"""
+    link = str(link).strip()
     try:
-        if "c/" in link: # Private (c/123456/100)
-            clean = link.split("c/")[1].split("?")[0].split("/")
-            data["id"] = clean[0] # String olarak alıyoruz ki smart_find eşleştirsin
-            
-            if len(clean) == 2:
-                data["msg_id"] = int(clean[1])
-            elif len(clean) == 3:
-                data["topic_id"] = int(clean[1])
-                data["msg_id"] = int(clean[2])
-                
+        if "c/" in link: # Private: t.me/c/123456/99
+            clean = link.split("c/")[1].split("/")[0]
+            return clean # String olarak döndür (123456)
+        else:
+            return None
+    except: return None
+
+def parse_full_link(link):
+    """Transfer için detaylı parse"""
+    data = {"id": None, "msg_id": None, "topic_id": None}
+    link = str(link).strip().replace("https://", "").replace("t.me/", "")
+    try:
+        if "c/" in link: 
+            parts = link.split("c/")[1].split("?")[0].split("/")
+            data["id"] = int("-100" + parts[0])
+            if len(parts) >= 2: data["msg_id"] = int(parts[-1])
+            if len(parts) > 2: data["topic_id"] = int(parts[1])
         else: # Public
+            parts = link.split("/")
             data["id"] = parts[0]
             if len(parts) >= 2: data["msg_id"] = int(parts[1])
-            if len(parts) >= 3: data["topic_id"] = int(parts[1]); data["msg_id"] = int(parts[2])
     except: return None
     return data
 
@@ -94,79 +73,75 @@ async def download_safe(ub, msg):
 @bot.on_message(filters.command("start"))
 async def start_handler(client, message):
     await message.reply(
-        "👋 **Yael Saver (Körlük Giderildi)**\n\n"
-        "Artık link istemiyorum. Userbot grubun içindeyse, ID'den tanırım.\n\n"
-        "🛠 **Araçlar:**\n"
-        "🔹 `/listele` -> Userbot'un gördüğü grupları listeler.\n"
-        "🔹 `/transfer <KAYNAK> <HEDEF>`\n"
-        "🔹 `/tekli <LINK>`"
+        "🕵️‍♂️ **Kayıp Grup Avcısı Bot**\n\n"
+        "Eğer bot grubu göremiyorsa şu adımı uygula:\n\n"
+        "1️⃣ O gruptan herhangi bir mesajın bağlantısını kopyala.\n"
+        "2️⃣ `/bul <MESAJ_LINKI>` yaz.\n"
+        "3️⃣ Bot grubu bulunca `/transfer` yap."
     )
 
 @bot.on_message(filters.command("iptal"))
 async def cancel_handler(client, message):
     global ABORT_FLAG
     ABORT_FLAG = True
-    await message.reply("🛑 Durdu.")
+    await message.reply("🛑 İşlem durduruldu.")
 
-# --- YENİ KOMUT: LİSTELE ---
-@bot.on_message(filters.command("listele"))
-async def listele_handler(client, message):
-    """Userbot'un gördüğü son 50 grubu listeler"""
-    status = await message.reply("🔍 **Grup listen çekiliyor...**")
-    text = "**📂 Görünen Gruplar (Userbot):**\n\n"
+# --- DERİN ARAMA KOMUTU (SENİN İLACIN BU) ---
+@bot.on_message(filters.command("bul"))
+async def bul_handler(client, message):
+    try:
+        link = message.command[1]
+        target_id_raw = resolve_link_id(link) # Örn: 1555999
+    except:
+        await message.reply("❌ Link gir. Örn: `/bul https://t.me/c/123456/789`")
+        return
+
+    if not target_id_raw:
+        await message.reply("❌ Linkten ID alınamadı. `t.me/c/` formatında olduğundan emin ol.")
+        return
+
+    status = await message.reply(f"🕵️‍♂️ **Derin Arama Başlatıldı...**\n\nAranan ID: `{target_id_raw}`\nUserbot'un tüm sohbetleri taranıyor (Bu biraz sürebilir)...")
+
+    found_chat = None
     count = 0
-    try:
-        async for dialog in userbot.get_dialogs(limit=50):
-            if dialog.chat.title:
-                # ID'yi temizleyip gösterelim ki kullanıcı kontrol etsin
-                clean_id = str(dialog.chat.id).replace("-100", "")
-                text += f"🔹 **{dialog.chat.title}**\n🆔 `{clean_id}`\n\n"
-                count += 1
+    
+    # Userbot'un tüm dialoglarını gez (Limit yok)
+    async for dialog in userbot.get_dialogs():
+        count += 1
         
-        if count == 0:
-            await status.edit("❌ Userbot hiç grup görmüyor! Session hatalı olabilir mi?")
-        else:
-            # Mesaj çok uzunsa bölmek gerekir ama şimdilik tek atalım
-            if len(text) > 4000: text = text[:4000] + "... (liste devam ediyor)"
-            await status.edit(text)
-            
-    except Exception as e:
-        await status.edit(f"❌ Hata: {e}")
-
-# --- TEKLİ İNDİRME ---
-@bot.on_message(filters.command("tekli"))
-async def tekli_cmd(client, message):
-    try: link = message.command[1]; data = resolve_link(link)
-    except: await message.reply("❌ Link gir."); return
-
-    status = await message.reply("🔄 **Akıllı Arama Yapılıyor...**")
-
-    try:
-        # ID Eşleştirme Yapıyoruz
-        chat = await smart_find_chat(data["id"])
+        # Userbot'taki ID'leri temizle (-100'ü at)
+        current_id = str(dialog.chat.id).replace("-100", "").replace("-", "")
         
-        if not chat:
-            await status.edit(f"❌ **Kanal Bulunamadı!**\nUserbot `{data['id']}` ID'li grupta görünmüyor.\n`/listele` yazarak kontrol et.")
-            return
-
-        msg = await userbot.get_messages(chat.id, data["msg_id"])
+        # Karşılaştır
+        if current_id == str(target_id_raw):
+            found_chat = dialog.chat
+            break
         
-        if not (msg.video or msg.photo or msg.document):
-            await status.edit("❌ Medya yok veya mesaj silinmiş.")
-            return
+        # Kullanıcıya canlı bilgi ver (Her 200 grupta bir)
+        if count % 200 == 0:
+            try: await status.edit(f"🕵️‍♂️ **Taranıyor...**\nKontrol edilen grup sayısı: {count}")
+            except: pass
 
-        await status.edit("📥 **İndiriliyor...**")
-        path = await download_safe(userbot, msg)
+    if found_chat:
+        # Bulunanı hafızaya at
+        FOUND_CHATS_CACHE[found_chat.id] = found_chat
         
-        await status.edit("📤 **Yükleniyor...**")
-        caption = msg.caption or ""
-        if msg.video: await bot.send_video(message.chat.id, video=path, caption=caption)
-        elif msg.photo: await bot.send_photo(message.chat.id, photo=path, caption=caption)
-        os.remove(path)
-        await status.delete()
-
-    except Exception as e:
-        await status.edit(f"❌ Hata: {e}")
+        await status.edit(
+            f"✅ **BINGO! GRUP BULUNDU!**\n\n"
+            f"📌 **Başlık:** {found_chat.title}\n"
+            f"🆔 **Orijinal ID:** `{found_chat.id}`\n\n"
+            f"Artık transfer komutunu kullanabilirsin:\n"
+            f"`/transfer {link} https://t.me/hedef_link`"
+        )
+    else:
+        await status.edit(
+            f"❌ **SONUÇ YOK!**\n\n"
+            f"Userbot hesabınla toplam **{count}** adet sohbete bakıldı ama `{target_id_raw}` ID'li grup bulunamadı.\n\n"
+            f"⚠️ **Olası Sebepler:**\n"
+            f"1. Yanlış Userbot (Session) ile giriş yaptın.\n"
+            f"2. Gruptan atıldın.\n"
+            f"3. O link bambaşka bir gruba ait."
+        )
 
 # --- TRANSFER ---
 @bot.on_message(filters.command("transfer"))
@@ -177,24 +152,38 @@ async def transfer_cmd(client, message):
     try: args = message.text.split(); src_link, dst_link = args[1], args[2]
     except: await message.reply("❌ `/transfer KAYNAK HEDEF`"); return
 
-    status = await message.reply("🔄 **Gruplar Eşleştiriliyor...**")
+    status = await message.reply("🔄 **Hazırlanıyor...**")
 
     try:
-        src_data = resolve_link(src_link)
-        dst_data = resolve_link(dst_link)
+        src_data = parse_full_link(src_link)
+        dst_data = parse_full_link(dst_link)
         
-        # 1. KAYNAK BUL
-        src_chat = await smart_find_chat(src_data["id"])
+        # --- KAYNAK KANALI ALMA (CACHE KONTROLLÜ) ---
+        src_chat = None
+        
+        # 1. Önce Cache'e bak (/bul komutu bulduysa buradadır)
+        if src_data["id"] in FOUND_CHATS_CACHE:
+            src_chat = FOUND_CHATS_CACHE[src_data["id"]]
+        else:
+            # 2. Cache'de yoksa get_chat dene
+            try:
+                src_chat = await userbot.get_chat(src_data["id"])
+            except:
+                # 3. Yine bulamazsa listeden manuel ara (Son şans)
+                target_raw = str(src_data["id"]).replace("-100", "")
+                async for d in userbot.get_dialogs():
+                    if str(d.chat.id).replace("-100", "") == target_raw:
+                        src_chat = d.chat; break
+        
         if not src_chat:
-            await status.edit(f"❌ **KAYNAK BULUNAMADI!**\nID: `{src_data['id']}`\nUserbot bu grupta değil mi? `/listele` yaz.")
+            await status.edit("❌ **KAYNAK GRUP BULUNAMADI!**\nÖnce `/bul KAYNAK_LINK` komutunu kullanarak botun grubu tanımasını sağla.")
             return
 
-        # 2. HEDEF BUL
-        dst_chat = await smart_find_chat(dst_data["id"])
-        if not dst_chat:
-            await status.edit(f"❌ **HEDEF BULUNAMADI!**\nID: `{dst_data['id']}`")
-            return
+        # --- HEDEF KANALI ALMA ---
+        try: dst_chat = await userbot.get_chat(dst_data["id"])
+        except: await status.edit("❌ Hedef grup bulunamadı."); return
 
+        # --- İŞLEM BAŞLIYOR ---
         baslangic = f"Mesaj {src_data['msg_id']}" if src_data['msg_id'] else "En Baştan"
         await status.edit(f"🚀 **Transfer Başlıyor!**\nK: {src_chat.title}\nH: {dst_chat.title}\nMod: {baslangic}")
 
@@ -202,13 +191,14 @@ async def transfer_cmd(client, message):
         async for m in userbot.get_chat_history(src_chat.id):
             if ABORT_FLAG: break
             
+            # ID Filtresi (Belli mesajdan sonrası)
+            if src_data["msg_id"] and m.id < src_data["msg_id"]: break
+            
             # Topic Filtresi
             if src_data["topic_id"]:
                 tid = getattr(m, "message_thread_id", None) or getattr(m, "reply_to_message_id", None)
                 if tid != src_data["topic_id"]: continue
-            
-            if src_data["msg_id"] and m.id < src_data["msg_id"]: break
-            
+                
             if m.video or m.photo or m.document:
                 msg_list.append(m.id)
 
@@ -231,7 +221,7 @@ async def transfer_cmd(client, message):
                 
                 s_args = {}
                 # Hedef Topic
-                target_top = dst_data["msg_id"] or dst_data["topic_id"]
+                target_top = dst_data["topic_id"] or dst_data["msg_id"]
                 if target_top: s_args["reply_to_message_id"] = target_top
 
                 cap = msg.caption or ""
@@ -243,7 +233,7 @@ async def transfer_cmd(client, message):
                 os.remove(path)
                 
                 if count % 5 == 0:
-                    try: await status.edit(f"🔄 **Aktarım:** {count}/{total}")
+                    try: await status.edit(f"🔄 **İlerliyor:** {count}/{total}")
                     except: pass
                 await asyncio.sleep(4)
 
@@ -256,16 +246,49 @@ async def transfer_cmd(client, message):
     except Exception as e:
         await status.edit(f"❌ Hata: {e}")
 
+# ==================== TEKLİ İNDİRME ====================
+@bot.on_message(filters.command("tekli"))
+async def tekli_cmd(client, message):
+    # (Yukarıdaki transfer mantığının aynısı tekli için de geçerli)
+    # Önce Cache kontrolü eklenerek burası da çalışır hale gelir.
+    try: link = message.command[1]; data = parse_full_link(link)
+    except: await message.reply("❌ Link gir."); return
+
+    status = await message.reply("🔄 **İşleniyor...**")
+    try:
+        # Önce Cache'e bak
+        if data["id"] in FOUND_CHATS_CACHE:
+            chat = FOUND_CHATS_CACHE[data["id"]]
+        else:
+            # Yoksa manuel ara
+            chat = None
+            target_raw = str(data["id"]).replace("-100", "")
+            async for d in userbot.get_dialogs():
+                if str(d.chat.id).replace("-100", "") == target_raw:
+                    chat = d.chat; break
+        
+        if not chat:
+            await status.edit("❌ Grup bulunamadı! `/bul` komutunu kullan.")
+            return
+
+        msg = await userbot.get_messages(chat.id, data["msg_id"])
+        path = await download_safe(userbot, msg)
+        
+        await status.edit("📤 **Yükleniyor...**")
+        if msg.video: await bot.send_video(message.chat.id, video=path, caption=msg.caption)
+        elif msg.photo: await bot.send_photo(message.chat.id, photo=path, caption=msg.caption)
+        os.remove(path)
+        await status.delete()
+    except Exception as e:
+        await status.edit(f"❌ Hata: {e}")
+
+
 # ==================== BAŞLATMA ====================
 async def main():
     keep_alive()
     await bot.start()
     await userbot.start()
-    
-    # Başlangıçta listeyi çekip RAM'e alalım
-    print("Liste güncelleniyor...")
-    async for d in userbot.get_dialogs(): pass
-    
+    print("Bot Hazır!")
     await idle()
     await bot.stop()
     await userbot.stop()
