@@ -4,80 +4,91 @@ import logging
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
 
-# ==================== MÜŞTERİ AYARLARI ====================
+# ==================== AYARLAR ====================
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
-# Eğer müşterinin sadece kendisinin kullanmasını istiyorsan buraya ID'sini yaz
-OWNER_ID = int(os.environ.get("OWNER_ID", "0")) 
 
 # Loglama
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("PremiumBot")
+logger = logging.getLogger("SaverBot")
 
 # Web Server
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Premium Bot Online 🟢"
+def home(): return "Bot Calisiyor 🟢"
 def run_web(): port = int(os.environ.get("PORT", 8080)); app.run(host="0.0.0.0", port=port)
 def keep_alive(): t = Thread(target=run_web); t.daemon = True; t.start()
 
 # Botlar
-bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
-userbot = Client("userbot_session", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
+bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
+userbot = Client("userbot", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
 
 ABORT_FLAG = False
+CHAT_CACHE = {} # Hafıza Deposu
 
-# ==================== ARKA PLAN ZEKA (AUTO-FIX) ====================
+# ==================== ZEKA VE HAFIZA ====================
 
-async def silent_chat_finder(chat_id_or_username):
-    """
-    Kullanıcıya hiçbir şey sormadan arka planda grubu bulur.
-    Önce normal dener, olmazsa tüm listeyi tarar.
-    """
+async def cache_all_chats():
+    """Bot açılınca tüm grupları buraya kaydeder"""
+    global CHAT_CACHE
+    logger.info("🧠 HAFIZA: Sohbetler taranıyor (Bu işlem biraz sürebilir)...")
+    count = 0
     try:
-        # 1. Normal Yöntem
-        return await userbot.get_chat(chat_id_or_username)
-    except:
-        # 2. Hata verirse sessizce listeyi tara (Brute Force)
-        target = str(chat_id_or_username).replace("-100", "").replace("@", "")
-        
         async for dialog in userbot.get_dialogs():
-            current_id = str(dialog.chat.id).replace("-100", "")
+            # Hem normal ID hem temiz ID (-100'süz) olarak kaydet
+            raw_id = str(dialog.chat.id)
+            clean_id = raw_id.replace("-100", "").replace("-", "")
             
-            # ID Eşleşmesi
-            if current_id == target:
-                return dialog.chat
+            CHAT_CACHE[raw_id] = dialog.chat
+            CHAT_CACHE[clean_id] = dialog.chat
             
-            # Username Eşleşmesi
-            if dialog.chat.username and dialog.chat.username.lower() == target.lower():
-                return dialog.chat
-                
-        # Hiçbir şekilde bulunamazsa
-        return None
+            if dialog.chat.username:
+                CHAT_CACHE[dialog.chat.username.lower()] = dialog.chat
+            count += 1
+    except Exception as e:
+        logger.error(f"Tarama hatası: {e}")
+        
+    logger.info(f"✅ HAFIZA: {count} sohbet kaydedildi. Artık bot kör değil.")
+
+async def get_chat_smart(chat_input):
+    """Hafızadan bulur, yoksa Telegram'a sorar"""
+    target = str(chat_input).replace("https://", "").replace("t.me/", "").replace("@", "").lower()
+    if "c/" in target: target = target.split("c/")[1].split("/")[0] # c/1234/55 -> 1234
+    
+    # 1. Hafızada var mı?
+    if target in CHAT_CACHE: return CHAT_CACHE[target]
+    
+    # 2. Direkt ID mi?
+    try: return await userbot.get_chat(int(target))
+    except: pass
+    try: return await userbot.get_chat(int("-100" + target))
+    except: pass
+    
+    # 3. Bulunamadı -> Listeyi Yenile ve Tekrar Bak
+    logger.info("⚠️ Kanal hafızada yok, yenileniyor...")
+    await cache_all_chats()
+    if target in CHAT_CACHE: return CHAT_CACHE[target]
+    
+    return None
 
 def parse_link(link):
-    """Linkten tüm verileri çeker"""
     data = {"id": None, "msg_id": None, "topic_id": None}
-    link = str(link).strip().replace("https://", "").replace("http://", "").replace("t.me/", "")
+    link = str(link).strip().replace("https://", "").replace("t.me/", "")
     parts = link.split("/")
     
     try:
         if "c/" in link: # Private Link
-            # t.me/c/123456/100 -> parts=['c', '123456', '100'] (örnek split mantığına göre değişir)
-            # Daha temiz split:
             clean = link.split("c/")[1].split("?")[0].split("/")
-            data["id"] = int("-100" + clean[0])
-            
+            data["id"] = clean[0]
             if len(clean) == 2: data["msg_id"] = int(clean[1])
             elif len(clean) == 3: 
                 data["topic_id"] = int(clean[1])
                 data["msg_id"] = int(clean[2])
-        else: # Public Link
+        else: # Public
             data["id"] = parts[0]
             if len(parts) >= 2: data["msg_id"] = int(parts[1])
             if len(parts) >= 3: 
@@ -93,121 +104,87 @@ async def download_safe(ub, msg):
     except: pass
     return None
 
-# ==================== ARAYÜZ VE KOMUTLAR ====================
+# ==================== KOMUTLAR ====================
 
 @bot.on_message(filters.command("start"))
-async def start_handler(client, message):
-    # Yetki Kontrolü (Opsiyonel: Sadece Owner kullanabilsin)
-    if OWNER_ID != 0 and message.from_user.id != OWNER_ID:
-        return
-        
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📥 Tekli İçerik Çek", callback_data="help_single"), 
-         InlineKeyboardButton("🚀 Toplu Transfer", callback_data="help_transfer")],
-        [InlineKeyboardButton("🛑 İşlemi Durdur", callback_data="stop_process")],
-        [InlineKeyboardButton("👨‍💻 Destek / İletişim", url="https://t.me/SeninKullaniciAdin")]
-    ])
-    
-    await message.reply_photo(
-        photo="https://i.ibb.co/vzJXn2S/bot-image.jpg", # Buraya güzel bir banner linki koy
-        caption=(
-            f"👋 **Hoşgeldin, {message.from_user.first_name}!**\n\n"
-            "Ben **Premium Content Saver Bot**.\n"
-            "İletim kısıtlı (Restricted) kanallardan içerik kopyalayabilirim.\n\n"
-            "🤖 **Sistem Durumu:** `Aktif`\n"
-            "⚡ **Mod:** `Otomatik Algılama`\n\n"
-            "👇 **Ne yapmak istersin?**"
-        ),
-        reply_markup=buttons
+async def start_cmd(client, message):
+    # Resim yok, sadece yazı. Donma yapmaz.
+    await message.reply(
+        "✅ **Bot Aktif ve Hazır!**\n\n"
+        "Userbot tüm sohbetleri hafızaya aldı.\n"
+        "Link atınca tanımama şansı yok.\n\n"
+        "🔹 `/getmedia <LINK>` -> Tekli İndir\n"
+        "🔹 `/transfer <KAYNAK> <HEDEF>` -> Toplu Aktar\n"
+        "🔹 `/iptal` -> Durdur"
     )
 
-@bot.on_callback_query()
-async def callback_handler(client, callback):
-    data = callback.data
-    if data == "help_single":
-        await callback.answer()
-        await callback.message.reply("📥 **Tekli İçerik İndirme:**\n\nKullanım:\n`/getmedia <LINK>`\n\nÖrnek:\n`/getmedia https://t.me/c/123456/99`")
-    elif data == "help_transfer":
-        await callback.answer()
-        await callback.message.reply("🚀 **Toplu Transfer:**\n\nKullanım:\n`/transfer <KAYNAK> <HEDEF>`\n\nÖrnek:\n`/transfer https://t.me/c/kaynak https://t.me/hedef`")
-    elif data == "stop_process":
-        global ABORT_FLAG
-        ABORT_FLAG = True
-        await callback.answer("İptal sinyali gönderildi!", show_alert=True)
-        await callback.message.reply("🛑 **İşlem durduruluyor...**")
+@bot.on_message(filters.command("iptal"))
+async def stop_cmd(client, message):
+    global ABORT_FLAG
+    ABORT_FLAG = True
+    await message.reply("🛑 İşlem durduruldu.")
 
-# ==================== TEKLİ İNDİRME (/getmedia) ====================
+# --- TEKLİ İNDİRME (/getmedia) ---
 @bot.on_message(filters.command("getmedia"))
 async def getmedia_cmd(client, message):
     try: link = message.command[1]
-    except: await message.reply("❌ **Kullanım:** `/getmedia https://t.me/...`"); return
+    except: await message.reply("❌ Link gir."); return
 
-    status = await message.reply("🔄 **Bağlanılıyor...**")
+    status = await message.reply("🔍 **Hafızadan aranıyor...**")
     
     data = parse_link(link)
     if not data or not data["msg_id"]:
-        await status.edit("❌ Geçersiz link.")
+        await status.edit("❌ Link bozuk. Mesaj ID'si yok.")
         return
 
-    # Arka planda sessizce bul
-    chat = await silent_chat_finder(data["id"])
-    
+    chat = await get_chat_smart(data["id"])
     if not chat:
-        await status.edit("❌ **Erişim Hatası!**\nUserbot bu kanalda bulunamadı. Lütfen Userbot hesabının gruba üye olduğundan emin ol.")
+        await status.edit(f"❌ **BULUNAMADI!**\nUserbot ID `{data['id']}` olan grupta değil.")
         return
 
     try:
         msg = await userbot.get_messages(chat.id, data["msg_id"])
-        
         if not (msg.video or msg.photo or msg.document):
-            await status.edit("❌ Medya bulunamadı.")
+            await status.edit("❌ Medya yok.")
             return
 
         await status.edit("📥 **İndiriliyor...**")
         path = await download_safe(userbot, msg)
         
-        await status.edit("📤 **Yükleniyor...**")
+        await status.edit("📤 **Gönderiliyor...**")
         cap = msg.caption or ""
-        
         if msg.video: await bot.send_video(message.chat.id, video=path, caption=cap)
         elif msg.photo: await bot.send_photo(message.chat.id, photo=path, caption=cap)
         elif msg.document: await bot.send_document(message.chat.id, document=path, caption=cap)
         
         os.remove(path)
         await status.delete()
-
     except Exception as e:
         await status.edit(f"❌ Hata: {e}")
 
-# ==================== TOPLU TRANSFER (/transfer) ====================
+# --- TOPLU TRANSFER (/transfer) ---
 @bot.on_message(filters.command("transfer"))
 async def transfer_cmd(client, message):
     global ABORT_FLAG
     ABORT_FLAG = False
 
     try: args = message.text.split(); src_link, dst_link = args[1], args[2]
-    except: await message.reply("❌ **Kullanım:** `/transfer KAYNAK HEDEF`"); return
+    except: await message.reply("❌ `/transfer KAYNAK HEDEF`"); return
 
-    status = await message.reply("🔄 **Analiz Ediliyor...**")
-
+    status = await message.reply("🔄 **Kontrol ediliyor...**")
+    
     try:
         src_data = parse_link(src_link)
         dst_data = parse_link(dst_link)
 
-        # Sessiz Arama (Müşteriyi yormadan)
-        src_chat = await silent_chat_finder(src_data["id"])
-        if not src_chat:
-            await status.edit("❌ **Kaynak Grup Bulunamadı!**\nUserbot'un gruba üye olduğundan emin olun.")
-            return
-            
-        dst_chat = await silent_chat_finder(dst_data["id"])
-        if not dst_chat:
-            await status.edit("❌ **Hedef Grup Bulunamadı!**")
-            return
+        src_chat = await get_chat_smart(src_data["id"])
+        if not src_chat: await status.edit("❌ Kaynak grup bulunamadı!"); return
+        
+        dst_chat = await get_chat_smart(dst_data["id"])
+        if not dst_chat: await status.edit("❌ Hedef grup bulunamadı!"); return
 
-        # Başlangıç Bilgisi
         start_msg = f"Mesaj {src_data['msg_id']}" if src_data['msg_id'] else "En Baştan"
-        await status.edit(f"🚀 **Transfer Başlatıldı**\n\n📤 **Kaynak:** {src_chat.title}\n📥 **Hedef:** {dst_chat.title}\n📍 **Başlangıç:** {start_msg}")
+        await status.edit(f"🚀 **Başlıyor!**\nK: {src_chat.title}\nH: {dst_chat.title}\nMod: {start_msg}")
 
         msg_list = []
         async for m in userbot.get_chat_history(src_chat.id):
@@ -226,22 +203,21 @@ async def transfer_cmd(client, message):
         msg_list.reverse()
         total = len(msg_list)
         
-        if total == 0: await status.edit("❌ İçerik bulunamadı."); return
+        if total == 0: await status.edit("❌ Medya yok."); return
 
         count = 0
-        await status.edit(f"📥 **Aktarım: 0/{total}**\n_Lütfen bekleyin..._")
+        await status.edit(f"📥 **Aktarım: 0/{total}**")
 
         for mid in msg_list:
-            if ABORT_FLAG: await status.edit("🛑 İşlem kullanıcı tarafından durduruldu."); return
+            if ABORT_FLAG: await status.edit("🛑 Durdu."); return
 
             try:
                 msg = await userbot.get_messages(src_chat.id, mid)
                 if not msg: continue
-                
                 path = await download_safe(userbot, msg)
                 if not path: continue
 
-                # Hedef Topic Ayarı
+                # Hedef Topic
                 s_args = {}
                 target_top = dst_data["msg_id"] or dst_data["topic_id"]
                 if target_top: s_args["reply_to_message_id"] = target_top
@@ -255,25 +231,28 @@ async def transfer_cmd(client, message):
                 os.remove(path)
                 
                 if count % 5 == 0:
-                    try: await status.edit(f"🔄 **Aktarım:** {count}/{total}")
+                    try: await status.edit(f"🔄 **{count}/{total}**")
                     except: pass
-                await asyncio.sleep(4) # Spam Koruması
-
+                await asyncio.sleep(4)
             except FloodWait as fw: await asyncio.sleep(fw.value + 5)
             except Exception as e:
                 if 'path' in locals() and os.path.exists(path): os.remove(path)
 
-        await bot.send_message(message.chat.id, f"✅ **İşlem Tamamlandı!**\nToplam {count} adet medya taşındı.")
-
+        await bot.send_message(message.chat.id, f"✅ **Bitti:** {count} dosya.")
     except Exception as e:
-        await status.edit(f"❌ Bir hata oluştu: {e}")
+        await status.edit(f"❌ Hata: {e}")
 
-# ==================== BAŞLATMA ====================
+# ==================== ANA ÇALIŞTIRMA (TARAMA BURADA) ====================
 async def main():
     keep_alive()
     await bot.start()
     await userbot.start()
-    print("Premium Bot Hazır!")
+    
+    # --- İŞTE BURASI TARAMA YAPIYOR ---
+    # Bot her açıldığında bunu yapar.
+    await cache_all_chats() 
+    # ----------------------------------
+    
     await idle()
     await bot.stop()
     await userbot.stop()
