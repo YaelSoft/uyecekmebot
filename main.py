@@ -7,7 +7,7 @@ from flask import Flask
 from pyrogram import Client, filters, idle
 from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid
 
-# ==================== 1. WEB SERVER (RENDER İÇİN) ====================
+# ==================== WEB SERVER ====================
 app = Flask(__name__)
 
 @app.route('/')
@@ -22,7 +22,7 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# ==================== 2. AYARLAR ====================
+# ==================== AYARLAR ====================
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
@@ -39,29 +39,53 @@ userbot = Client("userbot", api_id=API_ID, api_hash=API_HASH, session_string=SES
 
 ABORT_FLAG = False
 
-# ==================== 3. YARDIMCI FONKSİYONLAR ====================
+# ==================== HATA ÇÖZÜCÜLER ====================
 
 async def force_find_chat(chat_id):
     """
-    PeerIdInvalid hatasını çözmek için Userbot'un sohbet listesini tarar.
+    Kanalı bulmak için 3 aşamalı tarama yapar:
+    1. Direkt ID (-100'lü)
+    2. Düz ID (-100'süz)
+    3. Tüm liste taraması (Garanti Yöntem)
     """
+    # 1. Aşama: Direkt Dene
     try:
-        # Önce direkt dene
         return await userbot.get_chat(chat_id)
     except:
-        logger.info(f"⚠️ Kanal ({chat_id}) direkt bulunamadı, liste taranıyor...")
-        async for dialog in userbot.get_dialogs():
-            if str(dialog.chat.id) == str(chat_id):
+        pass # Hata verirse devam et
+
+    # 2. Aşama: ID Formatını Değiştirip Dene
+    try:
+        # Eğer -100 ile başlıyorsa, silip dene
+        alt_id = int(str(chat_id).replace("-100", ""))
+        return await userbot.get_chat(alt_id)
+    except:
+        pass
+
+    # 3. Aşama: Manuel Liste Taraması (LIMITSIZ)
+    logger.info(f"⚠️ Kanal ({chat_id}) direkt bulunamadı, TÜM liste taranıyor...")
+    
+    chat_str = str(chat_id).replace("-100", "") # Karşılaştırma için temiz ID
+    
+    async for dialog in userbot.get_dialogs(): # LİMİT YOK! Hepsini tarar.
+        d_id = str(dialog.chat.id).replace("-100", "")
+        
+        # ID Eşleşmesi
+        if d_id == chat_str:
+            logger.info(f"✅ Kanal bulundu (Liste Taraması): {dialog.chat.title}")
+            return dialog.chat
+            
+        # Username Eşleşmesi (Eğer link username ise)
+        if isinstance(chat_id, str) and dialog.chat.username:
+            if dialog.chat.username.lower() == chat_id.replace("@", "").lower():
                 return dialog.chat
-            if isinstance(chat_id, str) and dialog.chat.username:
-                if dialog.chat.username.lower() == chat_id.replace("@", "").lower():
-                    return dialog.chat
-        raise ValueError("Kanal bulunamadı! Userbot bu kanala üye mi?")
+
+    # Bulunamazsa loglara bas (Render loglarından görürsün)
+    logger.error(f"❌ KANAL BULUNAMADI! Aranan ID: {chat_id}")
+    raise ValueError("Userbot bu kanalı listesinde bulamadı! Üye olduğuna emin misin?")
 
 def resolve_link(link):
-    """
-    Linkten Chat ID, Mesaj ID ve Topic ID'yi ayıklar.
-    """
+    """Linkten ID'leri ayıklar (Hatasız)"""
     data = {"id": None, "msg_id": None, "topic_id": None}
     link = str(link).strip().replace("https://", "").replace("http://", "").replace("t.me/", "")
     
@@ -69,14 +93,16 @@ def resolve_link(link):
     
     try:
         if "c/" in link: # Private: c/123456/100
+            # Link c/123456/.. ise ID -100123456'dır.
             clean_parts = link.split("c/")[1].split("?")[0].split("/")
-            data["id"] = int("-100" + clean_parts[0])
+            raw_id = clean_parts[0]
+            data["id"] = int("-100" + raw_id)
             
-            # Topic tespiti (Bazen linkte topic ID'si mesaj ID gibi görünür)
+            # Mesaj ve Topic tespiti
             if len(clean_parts) >= 2:
-                data["msg_id"] = int(clean_parts[-1]) # Sondaki her zaman mesaj ID'dir
+                data["msg_id"] = int(clean_parts[-1]) # Son parça her zaman Mesaj ID
                 if len(clean_parts) > 2:
-                    data["topic_id"] = int(clean_parts[1]) # Ortadaki topic olabilir
+                    data["topic_id"] = int(clean_parts[1]) # Ortadaki parça Topic ID
                     
         else: # Public: username/100
             data["id"] = parts[0]
@@ -88,7 +114,7 @@ def resolve_link(link):
     return data
 
 async def download_with_verification(ub, msg, retries=3):
-    """Dosyayı indirir ve boyut doğrulaması yapar."""
+    """Sağlam İndirici"""
     expected_size = 0
     if msg.video: expected_size = msg.video.file_size
     elif msg.photo: expected_size = msg.photo.file_size
@@ -102,86 +128,69 @@ async def download_with_verification(ub, msg, retries=3):
             file_path = await ub.download_media(msg)
             if file_path and os.path.exists(file_path):
                 actual_size = os.path.getsize(file_path)
-                if actual_size >= expected_size * 0.95: # %95 doğruluk payı
+                if actual_size >= expected_size * 0.95:
                     return file_path
                 else:
                     os.remove(file_path)
-        except Exception as e:
+        except:
             if file_path and os.path.exists(file_path): os.remove(file_path)
         await asyncio.sleep(2)
     return None
 
-# ==================== 4. KOMUTLAR ====================
+# ==================== KOMUTLAR ====================
 
 @bot.on_message(filters.command("start"))
 async def start_handler(client, message):
     await message.reply(
-        "👋 **Merhaba! Ben Yael Saver Bot.**\n\n"
-        "İletim kısıtlı kanallardan içerik kopyalayabilirim.\n\n"
-        "**Komutlar:**\n"
-        "🔹 `/tekli <LINK>` - Tek bir medya indirir.\n"
-        "🔹 `/transfer <KAYNAK> <HEDEF>` - Toplu kopyalar.\n"
-        "🔹 `/iptal` - İşlemi durdurur.\n\n"
-        "ℹ️ *Transfer komutunda kaynak linke mesaj ID eklersen (örn: /100), oradan başlar ve sona kadar gider.*"
+        "👋 **Yael Saver Bot (Full Access)**\n\n"
+        "✅ `PeerIdInvalid` Fix (Limitsiz Tarama)\n"
+        "✅ `Topic` Desteği\n"
+        "✅ `İletim Kısıtlı` Desteği\n\n"
+        "**Nasıl Kullanılır?**\n"
+        "1️⃣ Kaynak linki al (sonundaki sayıları silersen hepsini çeker)\n"
+        "2️⃣ `/transfer KAYNAK HEDEF` yaz.\n"
+        "Örn: `/transfer https://t.me/c/123456 https://t.me/hedef`"
     )
 
 @bot.on_message(filters.command("iptal"))
 async def cancel_handler(client, message):
     global ABORT_FLAG
     ABORT_FLAG = True
-    await message.reply("🛑 **İşlem iptal edildi.**")
+    await message.reply("🛑 **İşlem durduruldu.**")
 
-# --- TEKLİ İNDİRME ---
 @bot.on_message(filters.command("tekli"))
 async def single_download(client, message):
     try:
         link = message.command[1]
+        data = resolve_link(link)
     except:
-        await message.reply("❌ Link girmelisin!\nÖrnek: `/tekli https://t.me/c/xxxx/123`")
+        await message.reply("❌ Link hatalı.")
         return
 
-    status = await message.reply("🔄 **İnceleniyor...**")
+    status = await message.reply("🔄 **Aranıyor...**")
 
     try:
-        data = resolve_link(link)
-        if not data or not data["msg_id"]:
-            await status.edit("❌ Hatalı Link! Mesaj ID'si içermeli.")
-            return
-
-        # PeerID Fix
         chat = await force_find_chat(data["id"])
-        
         msg = await userbot.get_messages(chat.id, data["msg_id"])
         
         if not (msg.video or msg.photo or msg.document):
-            await status.edit("❌ Bu mesajda indirilecek medya yok.")
+            await status.edit("❌ Medya yok.")
             return
 
         await status.edit("📥 **İndiriliyor...**")
         path = await download_with_verification(userbot, msg)
         
-        if not path:
-            await status.edit("❌ İndirme başarısız oldu.")
-            return
-
-        await status.edit("📤 **Gönderiliyor...**")
+        await status.edit("📤 **Yükleniyor...**")
         
-        # Bota gönder (Komutu kullanan kişiye)
         caption = msg.caption or ""
-        if msg.video:
-            await bot.send_video(message.chat.id, video=path, caption=caption)
-        elif msg.photo:
-            await bot.send_photo(message.chat.id, photo=path, caption=caption)
-        elif msg.document:
-            await bot.send_document(message.chat.id, document=path, caption=caption)
-
+        if msg.video: await bot.send_video(message.chat.id, video=path, caption=caption)
+        elif msg.photo: await bot.send_photo(message.chat.id, photo=path, caption=caption)
+        
         os.remove(path)
         await status.delete()
-
     except Exception as e:
         await status.edit(f"❌ Hata: {e}")
 
-# --- TOPLU TRANSFER (TOPIC DESTEKLİ) ---
 @bot.on_message(filters.command("transfer"))
 async def transfer_handler(client, message):
     global ABORT_FLAG
@@ -195,42 +204,41 @@ async def transfer_handler(client, message):
         await message.reply("❌ **Kullanım:** `/transfer KAYNAK HEDEF`")
         return
 
-    status = await message.reply("🔄 **Kanal Bağlantıları Kontrol Ediliyor...**")
+    status = await message.reply("🔄 **Kanallar aranıyor (Detaylı Tarama)...**")
 
     try:
         # Linkleri Çöz
         src_data = resolve_link(src_link)
         dst_data = resolve_link(dst_link)
 
-        # Kanalları Bul (PeerID Invalid Fix)
-        src_chat = await force_find_chat(src_data["id"])
-        dst_chat = await force_find_chat(dst_data["id"])
+        # Kanalları Bul (Zorla)
+        try:
+            src_chat = await force_find_chat(src_data["id"])
+            dst_chat = await force_find_chat(dst_data["id"])
+        except ValueError as ve:
+            await status.edit(f"❌ **Kanal Bulunamadı!**\n{ve}\n\n*Çözüm:* Userbot ile o gruba girip bir mesaj yazın veya okuyun.")
+            return
 
-        # Mesaj Listesini Oluştur
-        await status.edit("📦 **Mesaj Geçmişi Taranıyor...**\n_Bu işlem mesaj sayısına göre zaman alabilir._")
+        await status.edit(f"📦 **Mesajlar Toplanıyor...**\nKaynak: {src_chat.title}\nHedef: {dst_chat.title}")
         
         msg_list = []
         
-        # Pyrogram reverse=True desteklemediği için normal çekip biz ters çevireceğiz.
-        # Bu sayede Eskiden -> Yeniye doğru atarız.
+        # En Yeniden -> En Eskiye tarar
         async for m in userbot.get_chat_history(src_chat.id):
             if ABORT_FLAG: break
             
-            # Eğer kaynak linkte topic varsa, sadece o topici al
-            # Topic ID'si genellikle reply_to_message_id veya message_thread_id'dir.
+            # Topic Filtresi
             if src_data["topic_id"]:
                 t_id = getattr(m, "message_thread_id", None) or getattr(m, "reply_to_message_id", None)
-                if t_id != src_data["topic_id"]:
-                    continue # Başka topic, atla
+                if t_id != src_data["topic_id"]: continue
 
-            # Başlangıç mesajından ESKİSİNİ alma (ID küçüldükçe eskiye gider)
-            # Bizim istediğimiz: Verilen ID (örn 500) ve ondan sonrakiler (501, 502...)
-            # get_chat_history En Yeniden (örn 1000) başlar geriye gider (999, 998...).
-            # Eğer okunan mesajın ID'si, start_id'den küçükse döngüyü kırabiliriz.
+            # Başlangıç Mesajı Kontrolü
+            # Bizim istediğimiz: Verilen ID (500) ve SONRASI (501, 502...).
+            # get_chat_history 1000, 999, 998... diye gelir.
+            # Eğer gelen mesaj (499), bizim başlangıçtan (500) küçükse dur.
             if src_data["msg_id"] and m.id < src_data["msg_id"]:
                 break
             
-            # Sadece Medya Al
             if m.video or m.photo or m.document:
                 msg_list.append(m.id)
 
@@ -239,86 +247,70 @@ async def transfer_handler(client, message):
         total_msgs = len(msg_list)
         
         if total_msgs == 0:
-            await status.edit("❌ Aktarılacak medya bulunamadı.")
+            await status.edit("❌ Medya bulunamadı.")
             return
 
         baslangic_bilgisi = f"Mesaj {src_data['msg_id']}" if src_data['msg_id'] else "En Baştan"
-        await status.edit(f"🚀 **Transfer Başlıyor!**\n\n📝 Toplam: {total_msgs} Medya\n📍 Başlangıç: {baslangic_bilgisi}\n➡️ Yön: Eskiden -> Yeniye")
+        await status.edit(f"🚀 **Transfer Başlıyor!**\n📝 Dosya: {total_msgs}\n📍 Konum: {baslangic_bilgisi}")
 
-        success_count = 0
-        
+        count = 0
         for mid in msg_list:
             if ABORT_FLAG:
-                await status.edit("🛑 İşlem durduruldu.")
+                await status.edit("🛑 Durduruldu.")
                 return
 
             try:
-                # Mesajı taze çek
                 msg = await userbot.get_messages(src_chat.id, mid)
                 if not msg or msg.empty: continue
 
-                # İNDİR
-                file_path = await download_with_verification(userbot, msg)
-                if not file_path: continue
+                path = await download_with_verification(userbot, msg)
+                if not path: continue
 
-                # HEDEF TOPIC AYARI
+                # Hedef Topic Ayarı
                 send_args = {}
-                # Eğer hedef linkte bir mesaj ID varsa, onu topic ID olarak varsayalım
-                # (Kullanıcı Topic linki verdiyse linkin sonundaki ID topic ID'sidir)
-                if dst_data["msg_id"]: 
-                    send_args["reply_to_message_id"] = dst_data["msg_id"]
-                elif dst_data["topic_id"]:
-                    send_args["reply_to_message_id"] = dst_data["topic_id"]
+                if dst_data["msg_id"]: send_args["reply_to_message_id"] = dst_data["msg_id"]
+                elif dst_data["topic_id"]: send_args["reply_to_message_id"] = dst_data["topic_id"]
 
-                # YÜKLE
                 caption = msg.caption or ""
                 if msg.video:
-                    await userbot.send_video(
-                        dst_chat.id, video=file_path, caption=caption,
-                        duration=msg.video.duration, width=msg.video.width, height=msg.video.height,
-                        **send_args
-                    )
+                    await userbot.send_video(dst_chat.id, video=path, caption=caption, duration=msg.video.duration, **send_args)
                 elif msg.photo:
-                    await userbot.send_photo(dst_chat.id, photo=file_path, caption=caption, **send_args)
+                    await userbot.send_photo(dst_chat.id, photo=path, caption=caption, **send_args)
                 elif msg.document:
-                    await userbot.send_document(dst_chat.id, document=file_path, caption=caption, **send_args)
+                    await userbot.send_document(dst_chat.id, document=path, caption=caption, **send_args)
 
-                success_count += 1
-                os.remove(file_path) # Sil
+                count += 1
+                os.remove(path)
 
-                if success_count % 5 == 0:
-                    try: await status.edit(f"🔄 **Aktarılıyor...** {success_count}/{total_msgs}")
+                if count % 5 == 0:
+                    try: await status.edit(f"🔄 **Aktarım:** {count}/{total_msgs}")
                     except: pass
                 
-                await asyncio.sleep(4) # Spam Önlemi
+                await asyncio.sleep(4)
 
-            except FloodWait as fw:
-                await asyncio.sleep(fw.value + 5)
+            except FloodWait as fw: await asyncio.sleep(fw.value + 5)
             except Exception as e:
-                logger.error(f"Transfer Hatası: {e}")
-                if 'file_path' in locals() and os.path.exists(file_path): os.remove(file_path)
+                logger.error(f"Err: {e}")
+                if 'path' in locals() and os.path.exists(path): os.remove(path)
 
-        await bot.send_message(message.chat.id, f"✅ **BİTTİ!**\nToplam {success_count} medya başarıyla taşındı.")
+        await bot.send_message(message.chat.id, f"✅ **BİTTİ!** Toplam {count} dosya.")
 
     except Exception as e:
-        await status.edit(f"❌ Kritik Hata: {e}")
+        await status.edit(f"❌ Genel Hata: {e}")
 
-# ==================== 5. BAŞLATMA ====================
+# ==================== BAŞLATMA ====================
 async def main():
-    logger.info("Sistem başlatılıyor...")
+    logger.info("Botlar başlatılıyor...")
     keep_alive()
-    
     await bot.start()
     await userbot.start()
     
-    logger.info("♻️ Önbellek Yenileniyor (PeerIdInvalid Fix)...")
-    try:
-        # Dialogları tarayarak ID'leri hafızaya alıyoruz
-        async for d in userbot.get_dialogs(limit=200): pass
-        logger.info("✅ Sohbet listesi güncellendi!")
-    except: pass
+    logger.info("♻️ Kanal Listesi (Sınırsız) Taranıyor...")
+    # Sadece bir kere tüm listeyi çekip Pyrogram önbelleğine atıyoruz
+    # Limit yok, hepsini gezer.
+    async for d in userbot.get_dialogs(): pass
     
-    logger.info("🤖 Yael Saver Bot Hazır!")
+    logger.info("✅ Sistem Hazır!")
     await idle()
     await bot.stop()
     await userbot.stop()
