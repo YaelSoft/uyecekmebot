@@ -9,14 +9,14 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQ
 from pyrogram.errors import FloodWait
 
 # ==================== RENDER AYARLARI ====================
-# Render'daki Environment Variables kısmından çeker.
+# Render Environment Variables kısmından otomatik çeker.
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 
-# Arka planda aynı anda yapılacak işlem sayısı (Hız Ayarı)
+# Hız Ayarı (Aynı anda işlenecek dosya sayısı)
 MAX_JOBS = 4
 
 logging.basicConfig(level=logging.INFO)
@@ -79,17 +79,17 @@ def parse_link(link):
 
 @bot.on_message(filters.command("start"))
 async def start_handler(client, message):
-    # Müşteri/Yabancı Kontrolü
+    # Yetkisiz Kullanıcı Kontrolü
     if message.from_user.id != OWNER_ID:
         await message.reply(
             "🚫 **Yetkisiz Erişim**\n\n"
-            "Bu bot kişiye özeldir.\n"
+            "Bu bot, iletimi kısıtlı (Restricted) içerikleri indirmek için geliştirilmiş özel bir yazılımdır.\n"
             "Satın almak veya kurulum yaptırmak için:\n"
             "👉 **@yasin33**"
         )
         return
 
-    # Ana Menü
+    # Ana Menü Butonları
     menu_buttons = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📥 Tekli İndir", callback_data="page_single"),
@@ -98,12 +98,14 @@ async def start_handler(client, message):
         [InlineKeyboardButton("🛑 İŞLEMİ DURDUR", callback_data="stop_confirm")]
     ])
     
+    # Profesyonel Açıklama Metni
     await message.reply(
         f"👋 **Hoş Geldiniz, {message.from_user.first_name}**\n\n"
         f"🤖 **Yael Saver**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"Bot aktif ve kullanıma hazırdır.\n"
-        f"Lütfen yapmak istediğiniz işlemi seçin:",
+        f"Bu yazılım, Telegram üzerindeki **kopyalaması yasak (Restricted)** olan fotoğraf, video ve dosyaları orijinal kalitesinde indirmenizi ve kanallar arası **toplu transfer** yapmanızı sağlar.\n\n"
+        f"✅ **Sistem:** Aktif\n"
+        f"👇 **Lütfen yapmak istediğiniz işlemi seçin:**",
         reply_markup=menu_buttons
     )
 
@@ -124,22 +126,24 @@ async def callback_handler(client, callback):
             [InlineKeyboardButton("🛑 İŞLEMİ DURDUR", callback_data="stop_confirm")]
         ])
         await callback.message.edit_text(
-            f"👋 **Hoş Geldiniz**\n\n"
+            f"👋 **Ana Menü**\n\n"
             f"🤖 **Yael Saver**\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"Lütfen işlem seçin:",
+            f"İşlem seçiniz:",
             reply_markup=menu_buttons
         )
 
-    # Tekli İndirme Sayfası
+    # Tekli İndirme Sayfası (DÜZELTİLDİ)
     elif data == "page_single":
         await callback.answer()
         back = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri Dön", callback_data="main_menu")]])
         await callback.message.edit_text(
-            "📥 **TEKLİ İNDİRME**\n\n"
-            "Tek bir medya dosyasını indirmek için linki komutla girin.\n\n"
+            "📥 **TEKLİ İNDİRME MODÜLÜ**\n\n"
+            "Tek bir medya dosyasını (Video/Fotoğraf) indirmek için linki aşağıdaki komutla girin.\n\n"
             "📝 **Kullanım:**\n"
-            "`/getmedia <Link>`",
+            "`/indir <Link>`\n\n"
+            "💡 **Örnek:**\n"
+            "`/indir https://t.me/c/123456/99`",
             reply_markup=back
         )
 
@@ -148,8 +152,8 @@ async def callback_handler(client, callback):
         await callback.answer()
         back = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri Dön", callback_data="main_menu")]])
         await callback.message.edit_text(
-            "🚀 **TOPLU TRANSFER**\n\n"
-            "Bir kanaldaki içerikleri diğerine kopyalar.\n\n"
+            "🚀 **TOPLU TRANSFER MODÜLÜ**\n\n"
+            "Bir kanaldaki içerikleri sırasıyla hedef kanala kopyalar.\n\n"
             "📝 **Kullanım:**\n"
             "`/transfer <KAYNAK> <HEDEF>`\n\n"
             "📌 **Belirli Mesajdan Başlama:**\n"
@@ -185,17 +189,17 @@ async def callback_handler(client, callback):
 
 # ==================== İŞLEMLER ====================
 
-@bot.on_message(filters.command("getmedia") & filters.user(OWNER_ID))
-async def getmedia_cmd(client, message):
+@bot.on_message(filters.command("indir") & filters.user(OWNER_ID))
+async def indir_cmd(client, message):
     try: link = message.command[1]
     except: await message.reply("⚠️ Link girmelisiniz."); return
 
-    status = await message.reply("🔍 **Aranıyor...**")
+    status = await message.reply("🔍 **Medya Aranıyor...**")
     data = parse_link(link)
     chat = await get_chat_smart(data["id"])
     
     if not chat:
-        await status.edit("❌ Kanal bulunamadı.")
+        await status.edit("❌ Kanal bulunamadı. (Userbot üye mi?)")
         return
 
     try:
@@ -205,7 +209,7 @@ async def getmedia_cmd(client, message):
         path = await userbot.download_media(msg)
         
         if not path:
-            await status.edit("❌ İndirme başarısız.")
+            await status.edit("❌ İndirme başarısız (Dosya yok veya çok büyük).")
             return
 
         await status.edit("📤 **Yükleniyor...**")
@@ -271,7 +275,7 @@ async def transfer_cmd(client, message):
         dst_chat = await get_chat_smart(dst_data["id"])
         
         if not src_chat or not dst_chat:
-            await status.edit("❌ Kanal bulunamadı.")
+            await status.edit("❌ Kaynak veya Hedef kanal bulunamadı.")
             return
 
         msg_list = []
