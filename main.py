@@ -9,33 +9,27 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQ
 from pyrogram.errors import FloodWait
 
 # ==================== RENDER AYARLARI ====================
-# Render Environment Variables kısmından otomatik çeker.
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "")
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 
-# Hız Ayarı (Aynı anda işlenecek dosya sayısı)
 MAX_JOBS = 4
+
+# DENEME SÜRÜMÜ AYARLARI
+USER_USAGE = {} # Kim kaç tane indirdi?
+FREE_LIMIT = 3  # Bedava hak sayısı
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("YaelSaver")
 
 # ==================== WEB SERVER (RENDER İÇİN) ====================
 app = Flask(__name__)
-
 @app.route('/')
-def home(): return "Yael Saver Online"
-
-def run_web():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
-
-def keep_alive():
-    t = Thread(target=run_web)
-    t.daemon = True
-    t.start()
+def home(): return "Yael Saver Sales Mode Online"
+def run_web(): port = int(os.environ.get("PORT", 8080)); app.run(host="0.0.0.0", port=port)
+def keep_alive(): t = Thread(target=run_web); t.daemon = True; t.start()
 
 # ==================== BOT BAŞLATMA ====================
 bot = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
@@ -48,9 +42,7 @@ CHAT_CACHE = {}
 async def get_chat_smart(chat_input):
     target = str(chat_input).replace("https://", "").replace("t.me/", "").replace("@", "").lower()
     if "c/" in target: target = target.split("c/")[1].split("/")[0]
-    
     if target in CHAT_CACHE: return CHAT_CACHE[target]
-    
     try: return await userbot.get_chat(int(target))
     except: pass
     try: return await userbot.get_chat(int("-100" + target))
@@ -79,67 +71,52 @@ def parse_link(link):
 
 @bot.on_message(filters.command("start"))
 async def start_handler(client, message):
-    # Yetkisiz Kullanıcı Kontrolü
-    if message.from_user.id != OWNER_ID:
-        await message.reply(
-            "🚫 **Yetkisiz Erişim**\n\n"
-            "Bu bot, iletimi kısıtlı (Restricted) içerikleri indirmek için geliştirilmiş özel bir yazılımdır.\n"
-            "Satın almak veya kurulum yaptırmak için:\n"
-            "👉 **@yasin33**"
-        )
-        return
+    user_id = message.from_user.id
+    
+    # Kullanıcı Durumu (Admin mi Misafir mi?)
+    if user_id == OWNER_ID:
+        status_text = "👑 **Yönetici Modu** (Sınırsız)"
+    else:
+        used = USER_USAGE.get(user_id, 0)
+        remaining = max(0, FREE_LIMIT - used)
+        status_text = f"👤 **Misafir Modu**\n🎁 Deneme Hakkı: `{remaining}/{FREE_LIMIT}`"
 
-    # Ana Menü Butonları
     menu_buttons = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("📥 Tekli İndir", callback_data="page_single"),
-            InlineKeyboardButton("🚀 Toplu Transfer", callback_data="page_transfer")
-        ],
-        [InlineKeyboardButton("🛑 İŞLEMİ DURDUR", callback_data="stop_confirm")]
+        [InlineKeyboardButton("📥 Tekli İndir (Demo)", callback_data="page_single")],
+        [InlineKeyboardButton("🚀 Toplu Transfer (Premium)", callback_data="page_transfer")],
+        [InlineKeyboardButton("💎 SATIN AL / İLETİŞİM", url="https://t.me/yasin33")]
     ])
     
-    # Profesyonel Açıklama Metni
     await message.reply(
         f"👋 **Hoş Geldiniz, {message.from_user.first_name}**\n\n"
-        f"🤖 **Yael Saver**\n"
+        f"🤖 **Yael Saver - Kısıtlı İçerik İndirici**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"Bu yazılım, Telegram üzerindeki **kopyalaması yasak (Restricted)** olan fotoğraf, video ve dosyaları orijinal kalitesinde indirmenizi ve kanallar arası **toplu transfer** yapmanızı sağlar.\n\n"
-        f"✅ **Sistem:** Aktif\n"
-        f"👇 **Lütfen yapmak istediğiniz işlemi seçin:**",
+        f"{status_text}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"Bu bot, 'İletim Kısıtlaması' olan gruplardan içerik indirmenizi sağlar.\n"
+        f"Satın almadan önce sistemi test etmeniz için **{FREE_LIMIT} adet ücretsiz indirme** hakkınız vardır.\n\n"
+        f"👇 **İşlem Seçiniz:**",
         reply_markup=menu_buttons
     )
 
 @bot.on_callback_query()
 async def callback_handler(client, callback):
-    if callback.from_user.id != OWNER_ID:
-        await callback.answer("Yetkiniz yok.", show_alert=True)
-        return
-
     data = callback.data
+    user_id = callback.from_user.id
     
-    # Ana Menüye Dönüş
     if data == "main_menu":
-        await callback.answer()
-        menu_buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📥 Tekli İndir", callback_data="page_single"),
-             InlineKeyboardButton("🚀 Toplu Transfer", callback_data="page_transfer")],
-            [InlineKeyboardButton("🛑 İŞLEMİ DURDUR", callback_data="stop_confirm")]
-        ])
-        await callback.message.edit_text(
-            f"👋 **Ana Menü**\n\n"
-            f"🤖 **Yael Saver**\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"İşlem seçiniz:",
-            reply_markup=menu_buttons
-        )
+        await start_handler(client, callback.message)
 
-    # Tekli İndirme Sayfası (DÜZELTİLDİ)
     elif data == "page_single":
         await callback.answer()
         back = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri Dön", callback_data="main_menu")]])
+        
+        used = USER_USAGE.get(user_id, 0)
+        limit_info = "Sınırsız" if user_id == OWNER_ID else f"{max(0, FREE_LIMIT - used)} Hak Kaldı"
+        
         await callback.message.edit_text(
-            "📥 **TEKLİ İNDİRME MODÜLÜ**\n\n"
-            "Tek bir medya dosyasını (Video/Fotoğraf) indirmek için linki aşağıdaki komutla girin.\n\n"
+            f"📥 **TEKLİ İNDİRME** ({limit_info})\n\n"
+            "Fotoğraf veya video linkini göndererek indirebilirsiniz.\n\n"
             "📝 **Kullanım:**\n"
             "`/indir <Link>`\n\n"
             "💡 **Örnek:**\n"
@@ -147,50 +124,40 @@ async def callback_handler(client, callback):
             reply_markup=back
         )
 
-    # Transfer Sayfası
     elif data == "page_transfer":
         await callback.answer()
-        back = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri Dön", callback_data="main_menu")]])
-        await callback.message.edit_text(
-            "🚀 **TOPLU TRANSFER MODÜLÜ**\n\n"
-            "Bir kanaldaki içerikleri sırasıyla hedef kanala kopyalar.\n\n"
-            "📝 **Kullanım:**\n"
-            "`/transfer <KAYNAK> <HEDEF>`\n\n"
-            "📌 **Belirli Mesajdan Başlama:**\n"
-            "`/transfer .../kaynak/500 .../hedef`\n"
-            "*(500. mesajdan sonrasını alır)*",
-            reply_markup=back
-        )
-
-    # Durdurma Onayı
-    elif data == "stop_confirm":
-        await callback.answer()
-        confirm = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ EVET, DURDUR", callback_data="stop_process")],
-            [InlineKeyboardButton("🔙 İPTAL", callback_data="main_menu")]
+        premium_btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💎 SATIN AL / BİLGİ AL", url="https://t.me/yasin33")],
+            [InlineKeyboardButton("🔙 Geri Dön", callback_data="main_menu")]
         ])
         await callback.message.edit_text(
-            "⚠️ **DİKKAT**\n\n"
-            "Devam eden tüm işlemler durdurulacak.\n"
-            "Onaylıyor musunuz?",
-            reply_markup=confirm
+            "🚀 **TOPLU TRANSFER MODÜLÜ (PREMIUM)**\n\n"
+            "Bu özellik, binlerce dosyayı tek komutla kendi kanalınıza yedeklemenizi sağlar.\n\n"
+            "🔒 **Bu özellik sadece Full Sürümde aktiftir.**\n"
+            "Kendi botunuzu kurdurmak için iletişime geçin.",
+            reply_markup=premium_btn
         )
 
-    # Durdurma İşlemi
-    elif data == "stop_process":
-        global ABORT_FLAG
-        ABORT_FLAG = True
-        await callback.answer("İptal edildi!", show_alert=True)
-        await callback.message.edit_text(
-            "🛑 **SİSTEM DURDURULDU**\n\n"
-            "Mevcut indirmeler tamamlanınca bot duracaktır.\n"
-            "Tekrar başlatmak için `/start` yazın."
-        )
+# ==================== İNDİRME İŞLEMİ (LİMİT KONTROLLÜ) ====================
 
-# ==================== İŞLEMLER ====================
-
-@bot.on_message(filters.command("indir") & filters.user(OWNER_ID))
+@bot.on_message(filters.command("indir"))
 async def indir_cmd(client, message):
+    user_id = message.from_user.id
+    
+    # KOTA KONTROLÜ
+    if user_id != OWNER_ID:
+        used = USER_USAGE.get(user_id, 0)
+        if used >= FREE_LIMIT:
+            buy_btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 LİMİTSİZ SÜRÜMÜ AL", url="https://t.me/yasin33")]])
+            await message.reply(
+                "⛔ **DENEME HAKKINIZ BİTTİ**\n\n"
+                "Sistemin çalıştığını test ettiniz.\n"
+                "Sınırsız indirme ve toplu transfer özellikleri için botu satın almalısınız.\n\n"
+                "👇 **Hemen İletişime Geç:**",
+                reply_markup=buy_btn
+            )
+            return
+
     try: link = message.command[1]
     except: await message.reply("⚠️ Link girmelisiniz."); return
 
@@ -199,7 +166,7 @@ async def indir_cmd(client, message):
     chat = await get_chat_smart(data["id"])
     
     if not chat:
-        await status.edit("❌ Kanal bulunamadı. (Userbot üye mi?)")
+        await status.edit("❌ Kanal bulunamadı. (Userbot üye değil)")
         return
 
     try:
@@ -209,10 +176,10 @@ async def indir_cmd(client, message):
         path = await userbot.download_media(msg)
         
         if not path:
-            await status.edit("❌ İndirme başarısız (Dosya yok veya çok büyük).")
+            await status.edit("❌ İndirme başarısız.")
             return
 
-        await status.edit("📤 **Yükleniyor...**")
+        await status.edit("📤 **Gönderiliyor...**")
         
         cap = msg.caption or ""
         if msg.video: await bot.send_video(message.chat.id, video=path, caption=cap)
@@ -222,10 +189,18 @@ async def indir_cmd(client, message):
         if os.path.exists(path): os.remove(path)
         await status.delete()
         
+        # Kullanım Hakkını Düş
+        if user_id != OWNER_ID:
+            USER_USAGE[user_id] = USER_USAGE.get(user_id, 0) + 1
+            remaining = max(0, FREE_LIMIT - USER_USAGE[user_id])
+            await message.reply(f"🎁 **Kalan Deneme Hakkı:** {remaining}")
+        
     except Exception as e:
         await status.edit(f"❌ Hata: {e}")
 
-# --- ARKA PLAN İŞÇİSİ ---
+# ==================== TRANSFER (SADECE OWNER) ====================
+
+# Yardımcı Transfer İşçisi
 async def transfer_worker(sem, mid, src, dst, args):
     if ABORT_FLAG: return (False, 0)
     async with sem:
@@ -258,13 +233,22 @@ async def transfer_worker(sem, mid, src, dst, args):
             if path and os.path.exists(path): os.remove(path)
             return (False, 0)
 
-@bot.on_message(filters.command("transfer") & filters.user(OWNER_ID))
+@bot.on_message(filters.command("transfer"))
 async def transfer_cmd(client, message):
+    # YETKİ KONTROLÜ
+    if message.from_user.id != OWNER_ID:
+        await message.reply(
+            "🔒 **Bu özellik sadece PREMIUM Sürümde aktiftir.**\n"
+            "Sınırsız toplu transfer için satın almalısınız.\n"
+            "👉 @yasin33"
+        )
+        return
+
     global ABORT_FLAG
     ABORT_FLAG = False
     
     try: args = message.text.split(); src_link, dst_link = args[1], args[2]
-    except: await message.reply("⚠️ Hatalı. Kullanım: `/transfer KAYNAK HEDEF`"); return
+    except: await message.reply("⚠️ Kullanım: `/transfer KAYNAK HEDEF`"); return
 
     status = await message.reply("🔄 **Analiz Ediliyor...**")
     
@@ -275,7 +259,7 @@ async def transfer_cmd(client, message):
         dst_chat = await get_chat_smart(dst_data["id"])
         
         if not src_chat or not dst_chat:
-            await status.edit("❌ Kaynak veya Hedef kanal bulunamadı.")
+            await status.edit("❌ Kanal bulunamadı.")
             return
 
         msg_list = []
@@ -292,13 +276,11 @@ async def transfer_cmd(client, message):
         tasks = []
         processed = 0
         success = 0
-        total_size = 0.0
         
         await status.edit(f"🚀 **Transfer Başladı**\n📂 Toplam: `{total}` dosya")
         
         for mid in msg_list:
             if ABORT_FLAG: break
-            
             dst_args = {}
             if dst_data["msg_id"]: dst_args["reply_to_message_id"] = dst_data["msg_id"]
             
@@ -310,26 +292,15 @@ async def transfer_cmd(client, message):
                 for t in done:
                     res, size = t.result()
                     processed += 1
-                    if res: success += 1; total_size += size
+                    if res: success += 1
                 
                 try:
                     percent = int((processed / total) * 100)
-                    await status.edit(
-                        f"🔄 **İşleniyor...**\n"
-                        f"📊 İlerleme: %{percent}\n"
-                        f"✅ Başarılı: {success} / {total}"
-                    )
+                    await status.edit(f"🔄 **İşleniyor...**\n📊 İlerleme: %{percent} ({processed}/{total})")
                 except: pass
 
         if tasks: await asyncio.wait(tasks)
-        
-        await status.edit(
-            f"✅ **TAMAMLANDI**\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📂 Dosya: `{total}`\n"
-            f"✅ Başarılı: `{success}`\n"
-            f"💾 Boyut: `{int(total_size)} MB`"
-        )
+        await status.edit("✅ **TRANSFER TAMAMLANDI!**")
         
     except Exception as e:
         await status.edit(f"❌ Hata: {e}")
@@ -340,7 +311,7 @@ async def main():
     print("Bot Başlatılıyor...")
     await bot.start()
     await userbot.start()
-    print("✅ YAEL SAVER AKTİF")
+    print("✅ YAEL SAVER CLEAN SALES MODE AKTİF")
     await idle()
     await bot.stop()
     await userbot.stop()
