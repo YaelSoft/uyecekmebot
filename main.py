@@ -249,9 +249,19 @@ async def indir_cmd(client, message):
     chat = await get_chat_smart(data["id"])
     
     if not chat:
-        await status.edit("❌ Kanal bulunamadı. (Userbot üye değil)")
+        # Userbot kanalda yoksa burası çalışır
+        buy_btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💎 KENDİ BOTUNU KURDUR", url="https://t.me/yasin33")]
+        ])
+        await status.edit(
+            "❌ **ERİŞİM HATASI!**\n\n"
+            "Bu içerik **Özel/Gizli** bir kanalda ve benim o kanala erişimim yok.\n\n"
+            "💡 **ÇÖZÜM:**\n"
+            "Kendi özel gruplarınızdan indirme yapmak için **Kişiye Özel Bot Kurulumu** satın almalısınız.\n"
+            "Böylece bot sizin hesabınız üzerinden her yere erişebilir.",
+            reply_markup=buy_btn
+        )
         return
-
     try:
         msg = await userbot.get_messages(chat.id, data["msg_id"])
         
@@ -396,3 +406,4 @@ async def main():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
