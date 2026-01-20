@@ -19,8 +19,8 @@ MAX_JOBS = 4
 FREE_LIMIT = 3
 
 # HAFIZA SİSTEMLERİ
-USER_USAGE = {}       # Kota takibi
-USER_STATE = {}       # Kullanıcı durumu
+USER_USAGE = {}       
+USER_STATE = {}       
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("YaelSaver")
@@ -28,7 +28,7 @@ logger = logging.getLogger("YaelSaver")
 # ==================== WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver Final Online"
+def home(): return "Yael Saver Active"
 def run_web(): port = int(os.environ.get("PORT", 8080)); app.run(host="0.0.0.0", port=port)
 def keep_alive(): t = Thread(target=run_web); t.daemon = True; t.start()
 
@@ -109,12 +109,10 @@ async def callback_handler(client, callback):
     data = callback.data
     user_id = callback.from_user.id
     
-    # ANA MENÜ
     if data == "main_menu":
         if user_id in USER_STATE: del USER_STATE[user_id]
         await start_handler(client, callback.message)
 
-    # İNDİRME MODU
     elif data == "btn_indir":
         await callback.answer()
         back = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 İptal / Geri Dön", callback_data="main_menu")]])
@@ -136,7 +134,6 @@ async def callback_handler(client, callback):
             reply_markup=back
         )
 
-    # TRANSFER SAYFASI
     elif data == "btn_transfer":
         await callback.answer()
         back = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri Dön", callback_data="main_menu")]])
@@ -159,7 +156,6 @@ async def callback_handler(client, callback):
                 reply_markup=premium_btn
             )
 
-    # --- YENİ METİNSEL KULLANIM KILAVUZU ---
     elif data == "show_tutorial":
         await callback.answer()
         back = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menüye Dön", callback_data="main_menu")]])
@@ -180,7 +176,6 @@ async def callback_handler(client, callback):
             reply_markup=back
         )
 
-    # DURDURMA (ADMİN)
     elif data == "stop_confirm":
         if user_id != OWNER_ID: return
         confirm = InlineKeyboardMarkup([[InlineKeyboardButton("✅ EVET", callback_data="stop_process"), InlineKeyboardButton("🔙 HAYIR", callback_data="main_menu")]])
@@ -192,7 +187,7 @@ async def callback_handler(client, callback):
         await callback.answer("Durduruldu.", show_alert=True)
         await callback.message.edit_text("🛑 **SİSTEM DURDURULDU**")
 
-# ==================== MESAJ DİNLEYİCİ (LİNK YAKALAYICI) ====================
+# ==================== MESAJ DİNLEYİCİ ====================
 @bot.on_message(filters.text & ~filters.command(["start", "transfer"]))
 async def message_handler(client, message):
     user_id = message.from_user.id
@@ -213,12 +208,11 @@ async def message_handler(client, message):
         return
 
     status = await message.reply("🔍 **Medya Aranıyor...**")
-    del USER_STATE[user_id] # İşlem başladı, modu kapat
+    del USER_STATE[user_id] 
 
     data = parse_link(link)
     chat = await get_chat_smart(data["id"])
     
-    # ÖZEL KANAL UYARISI
     if not chat:
         buy_btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 KENDİ BOTUNU KURDUR", url="https://t.me/yasin33")]])
         await status.edit(
@@ -322,7 +316,11 @@ async def transfer_cmd(client, message):
                 done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 tasks = list(pending)
                 for t in done: processed += 1
-                try: await status.edit(f"🔄 **İşleniyor...**\n📊 İlerleme: %{int((processed/total)*100)} ({processed}/{total})"); except: pass
+                try: 
+                    # HATA BURADAYDI, DÜZELTİLDİ
+                    percent = int((processed/total)*100)
+                    await status.edit(f"🔄 **İşleniyor...**\n📊 İlerleme: %{percent} ({processed}/{total})")
+                except: pass
 
         if tasks: await asyncio.wait(tasks)
         await status.edit("✅ **TRANSFER TAMAMLANDI!**")
