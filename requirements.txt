@@ -1,4 +1,5 @@
-Flask
 pyrogram
 tgcrypto
-pysqlite3
+flask
+motor
+dnspython
