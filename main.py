@@ -226,9 +226,13 @@ async def cb_handler(client, callback):
         status_text = "👑 **SINIRSIZ VIP**" if is_vip else "👤 Standart Üye"
         balance_text = "♾️ Sınırsız" if is_vip else f"{u['balance']} Dosya"
         
-        # EFSANE REFERANS MESAJI
+        # ✅ YENİ DÜRÜST VE ETKİLİ PAYLAŞIM MESAJI
         ref_link = f"https://t.me/{client.me.username}?start={user_id}"
-        share_text = f"😱 **Kanka bu bot şaka mı?**\nGizli gruplara giriyor, Instagram, TikTok ne varsa indiriyor.\nBence kapanmadan hemen dene: {ref_link}"
+        share_text = (
+            f"🔓 **Telegram'da 'İndirme Yasak' olan gruplardan video/resim indiren botu buldum!**\n\n"
+            f"Görüntü kalitesini bozmuyor ve 3 hak ücretsiz veriyor. Bir dene istersen:\n"
+            f"{ref_link}"
+        )
         share_url = f"https://t.me/share/url?url={share_text}"
 
         text = (
@@ -237,10 +241,10 @@ async def cb_handler(client, callback):
             f"🛡 Üyelik: {status_text}\n"
             f"💰 Hak: `{balance_text}`\n\n"
             f"🔗 **Davet Linkin:**\n`{ref_link}`\n\n"
-            f"🎁 **Her davet +{REF_REWARD} Hak kazandırır!**"
+            f"🎁 **Arkadaşını davet et, +{REF_REWARD} Hak kazan!**"
         )
         btns = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 Arkadaşlarına Gönder", url=share_url)],
+            [InlineKeyboardButton("📤 Arkadaşlarına Öner", url=share_url)],
             [InlineKeyboardButton("🔙 Geri", callback_data="back_home")]
         ])
         await callback.message.edit(text, reply_markup=btns)
@@ -380,3 +384,4 @@ if __name__ == '__main__':
     Thread(target=run_web).start()
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
