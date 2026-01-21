@@ -31,15 +31,14 @@ PRICE_LIFE_STARS = "2000 ⭐"
 # SİSTEM
 DB_FILE = "users_backup.json" 
 BACKUP_INTERVAL = 3600 
-BOT_USERNAME = "" # Otomatik dolacak
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV11")
+logger = logging.getLogger("YaelV11.5")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V11.0 Active 🟢"
+def home(): return "Yael Saver V11.5 Active 🟢"
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -86,19 +85,15 @@ async def check_expirations_task():
                     data["vip_until"] = 0
                     global is_dirty
                     is_dirty = True
-                    try: 
-                        await bot.send_message(int(uid), "⏳ **PAKET SÜRENİZ DOLDU!**\nÜcretsiz deneme sürümüne geçtiniz.")
-                    except: 
-                        pass
+                    try: await bot.send_message(int(uid), "⏳ **PAKET SÜRENİZ DOLDU!**\nÜcretsiz deneme sürümüne geçtiniz.")
+                    except: pass
         except: pass
         await asyncio.sleep(BACKUP_INTERVAL)
 
 async def reload_userbot_cache():
     try: 
-        async for dialog in userbot.get_dialogs(): 
-            pass 
-    except: 
-        pass
+        async for dialog in userbot.get_dialogs(): pass 
+    except: pass
 
 # --- KULLANICI FONKSİYONLARI ---
 def get_user(user_id):
@@ -158,7 +153,6 @@ def get_main_menu():
         [InlineKeyboardButton("💎 PAKETLERİ GÖR (Sınırsız)", callback_data="buy_vip")]
     ])
 
-# BU FONKSİYON START VE GERİ DÖN İÇİN ORTAK METNİ VERİR
 def get_start_caption(first_name):
     return (
         f"👋 **Hoş Geldin, {first_name}!**\n\n"
@@ -228,7 +222,7 @@ async def broadcast_cmd(client, message):
         except: pass
     await msg.edit(f"✅ **{c} Kişiye ulaştı.**")
 
-# ==================== 🚀 ARAYÜZ (V11.0 PLATINUM) ====================
+# ==================== 🚀 ARAYÜZ (V11.5 GARANTİLİ) ====================
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
     try:
@@ -243,9 +237,7 @@ async def start_command(client, message):
                     except: pass
             except: pass
         
-        # 🔥 ORTAK DETAYLI MESAJ KULLANILIYOR
         caption_text = get_start_caption(first_name)
-        
         try:
             await message.reply_photo(photo=BOT_IMAGE, caption=caption_text, reply_markup=get_main_menu())
         except:
@@ -259,7 +251,6 @@ async def cb_handler(client, callback):
     u = get_user(user_id)
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]])
 
-    # 🔥 DÜZELTME: Ana Menüye dönerken /start ile BİREBİR AYNI mesajı atar
     if data == "back_home":
         await callback.message.delete()
         caption_text = get_start_caption(callback.from_user.first_name)
@@ -293,8 +284,14 @@ async def cb_handler(client, callback):
         await smart_edit(callback.message, text, back_btn)
 
     elif data == "invite_friend":
-        # 🔥 REFERANS DÜZELTME: Botun kullanıcı adı otomatik çekiliyor
-        link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+        # 🔥🔥🔥 İŞTE ÇÖZÜM BURADA: Butona basınca anlık soruyoruz 🔥🔥🔥
+        try:
+            me = await client.get_me()
+            bot_username = me.username
+        except:
+            bot_username = "YaelSaverBot" # Asla boş kalmaz
+            
+        link = f"https://t.me/{bot_username}?start={user_id}"
         share_text = f"🔥 **Yael Saver ile gizli içerikleri indir!**\n\nÜcretsiz deneme hakkı veriyor.\n\n👇 Hemen dene:\n{link}"
         url = f"https://t.me/share/url?url={share_text}"
         text = f"🎁 **DAVET ET KAZAN**\n━━━━━━━━━━━━━━━━━━\nArkadaşlarını davet et, **+2 İndirme Hakkı** kazan!\n\n🔗 **Senin Davet Linkin:**\n`{link}`\n\n👇 **Paylaş:**"
@@ -386,27 +383,17 @@ async def process_link(client, message):
 
 # ==================== BAŞLATMA ====================
 async def main():
-    global db_cache, BOT_USERNAME
+    global db_cache
     print("🤖 Başlatılıyor...")
     try: await bot.start()
     except: pass
     try: await userbot.start()
     except: pass
-    
-    # 🔥 BOT KULLANICI ADINI ÖĞRENİYORUZ
-    try:
-        me = await bot.get_me()
-        BOT_USERNAME = me.username
-        print(f"✅ Bot Username: @{BOT_USERNAME}")
-    except:
-        BOT_USERNAME = OWNER_USERNAME
-        print("⚠️ Bot username alınamadı, fallback kullanılıyor.")
-
     db_cache = await restore_data()
     await reload_userbot_cache()
     asyncio.create_task(backup_task())
     asyncio.create_task(check_expirations_task())
-    print("✅ YAEL SAVER V11.0 PLATINUM ACTIVE")
+    print("✅ YAEL SAVER V11.5 PLATINUM ACTIVE")
     try: await idle()
     except: pass
     finally:
