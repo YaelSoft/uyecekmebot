@@ -16,7 +16,9 @@ SESSION_STRING = os.environ.get("SESSION_STRING", "")
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) 
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
-BOT_IMAGE = "https://i.ibb.co/3Wnqmq0/robot-cyber-tech.jpg" 
+
+# 🔥 SENİN GITHUB RESMİN (RAW LİNK)
+BOT_IMAGE = "https://github.com/YaelSoft/uyecekmebot/raw/a946c9c8f33435a5f6ff9ee65bcfd353f5156d9b/logo.jpeg"
 
 # FİYAT VE ÖDÜL
 START_BALANCE = 3
@@ -29,12 +31,12 @@ DB_FILE = "users_backup.json"
 BACKUP_INTERVAL = 3600 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelIronclad")
+logger = logging.getLogger("YaelFinal")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V8.0 Active 🟢"
+def home(): return "Yael Saver V8.2 Active 🟢"
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -71,18 +73,13 @@ async def backup_task():
         await asyncio.sleep(BACKUP_INTERVAL)
         if is_dirty: await save_now(reason="Saatlik")
 
-# ==================== 🛠️ KRİTİK DÜZELTME: HAFIZA TAZELEME ====================
 async def reload_userbot_cache():
-    """Userbot açılınca tüm kanalları hafızaya alır ki ID hatası vermesin"""
-    print("🔄 Userbot hafızası tazeleniyor... (Lütfen bekleyin)")
+    """Hafıza Tazeleme"""
+    print("🔄 Userbot hafızası tazeleniyor...")
     try:
-        # Userbot'un olduğu tüm sohbetleri çekiyoruz
-        # Bu işlem Pyrogram'ın ID'leri öğrenmesini sağlar
-        async for dialog in userbot.get_dialogs():
-            pass 
-        print("✅ Hafıza tazelendi! Artık ID hatası vermez.")
-    except Exception as e:
-        print(f"⚠️ Hafıza tazelenirken hata: {e}")
+        async for dialog in userbot.get_dialogs(): pass 
+        print("✅ Hafıza güncel.")
+    except: pass
 
 # --- KULLANICI FONKSİYONLARI ---
 def get_user(user_id):
@@ -178,23 +175,37 @@ def get_main_menu():
 
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
-    user_id = message.from_user.id
-    first_name = message.from_user.first_name
-    get_user(user_id) 
+    try:
+        user_id = message.from_user.id
+        first_name = message.from_user.first_name
+        get_user(user_id) 
 
-    if len(message.command) > 1:
-        try:
-            ref_id = message.command[1]
-            if add_ref(user_id, ref_id):
-                try: await client.send_message(int(ref_id), f"🔥 **Yeni Referans!**\nArkadaşın katıldı, +{REF_REWARD} Hak kazandın!")
-                except: pass
-        except: pass
+        if len(message.command) > 1:
+            try:
+                ref_id = message.command[1]
+                if add_ref(user_id, ref_id):
+                    try: await client.send_message(int(ref_id), f"🔥 **Yeni Referans!**\nArkadaşın katıldı, +{REF_REWARD} Hak kazandın!")
+                    except: pass
+            except: pass
 
-    await message.reply_photo(
-        photo=BOT_IMAGE,
-        caption=f"👋 **Hoş Geldin, {first_name}!**\n\n🤖 **Yael Saver** sistemine bağlandın.\nİçerik indirmek için link göndermen yeterli.",
-        reply_markup=get_main_menu()
-    )
+        # 🔥 RESİMLİ MENÜ (Senin Linkinle)
+        await message.reply_photo(
+            photo=BOT_IMAGE,
+            caption=(
+                f"👋 **Hoş Geldin, {first_name}!**\n\n"
+                f"🤖 **Yael Saver** sistemine bağlandın.\n"
+                f"Telegram'ın en gelişmiş içerik indirme asistanıyım.\n\n"
+                f"👇 **Ne yapmak istersin?**"
+            ),
+            reply_markup=get_main_menu()
+        )
+    except Exception as e:
+        print(f"Start Hatası: {e}")
+        # Resim hatası olursa yedek plan (Yazı)
+        await message.reply(
+            f"👋 **Hoş Geldin, {first_name}!**\n(Resim yüklenemedi ama sistem aktif)\n\n👇 **Menü:**",
+            reply_markup=get_main_menu()
+        )
 
 @bot.on_callback_query()
 async def cb_handler(client, callback):
@@ -206,15 +217,23 @@ async def cb_handler(client, callback):
     try:
         if data == "back_home":
             await callback.message.delete()
-            await client.send_photo(user_id, photo=BOT_IMAGE, caption="👋 **Ana Menüdesin.**\n👇 İşlem seç:", reply_markup=get_main_menu())
+            await client.send_photo(
+                user_id,
+                photo=BOT_IMAGE,
+                caption="👋 **Ana Menüdesin.**\n👇 İşlem seç:",
+                reply_markup=get_main_menu()
+            )
 
         elif data == "my_account":
             is_vip = u.get("is_vip", False)
             status = "👑 VIP" if is_vip else "👤 Standart"
             bal = "♾️ Sınırsız" if is_vip else f"{u['balance']} Dosya"
             link = f"https://t.me/{client.me.username}?start={user_id}"
+            
             text = f"👤 **HESAP**\n🆔 `{user_id}`\n🛡 {status}\n💰 {bal}\n🔗 `{link}`"
-            await callback.message.edit_caption(caption=text, reply_markup=back_btn)
+            # Resim varsa edit_caption kullanılır
+            try: await callback.message.edit_caption(caption=text, reply_markup=back_btn)
+            except: await callback.message.edit_text(text, reply_markup=back_btn)
 
         elif data == "invite_friend":
             link = f"https://t.me/{client.me.username}?start={user_id}"
@@ -222,7 +241,8 @@ async def cb_handler(client, callback):
             url = f"https://t.me/share/url?url={share_text}"
             text = f"🎁 **BEDAVA HAK KAZAN!**\nHer arkadaşın için **+{REF_REWARD} HAK** kazan.\n👇 Paylaş:"
             btns = InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=url)], [InlineKeyboardButton("🔙 Geri", callback_data="back_home")]])
-            await callback.message.edit_caption(caption=text, reply_markup=btns)
+            try: await callback.message.edit_caption(caption=text, reply_markup=btns)
+            except: await callback.message.edit_text(text, reply_markup=btns)
 
         elif data == "buy_vip":
             text = f"💎 **VIP AL**\n✅ Sınırsız İndirme\n✅ Reklamsız\n\n👇 Ödeme Yöntemi:"
@@ -231,13 +251,16 @@ async def cb_handler(client, callback):
                 [InlineKeyboardButton(f"💳 {VIP_PRICE_TL}", url=f"https://t.me/{OWNER_USERNAME}")],
                 [InlineKeyboardButton("🔙 İptal", callback_data="back_home")]
             ])
-            await callback.message.edit_caption(caption=text, reply_markup=btns)
+            try: await callback.message.edit_caption(caption=text, reply_markup=btns)
+            except: await callback.message.edit_text(text, reply_markup=btns)
 
         elif data == "how_to":
-            await callback.message.edit_caption("❓ **NASIL?**\n1. Linki kopyala.\n2. Buraya yapıştır.\n⚠️ Hata alırsan önce **Davet Linkini** at.", reply_markup=back_btn)
+            try: await callback.message.edit_caption("❓ **NASIL?**\n1. Linki kopyala.\n2. Buraya yapıştır.\n⚠️ Hata alırsan önce **Davet Linkini** at.", reply_markup=back_btn)
+            except: await callback.message.edit_text("❓ **NASIL?**\n1. Linki kopyala.\n2. Buraya yapıştır.\n⚠️ Hata alırsan önce **Davet Linkini** at.", reply_markup=back_btn)
 
         elif data == "bulk_info":
-            await callback.message.edit_caption(f"📦 **TOPLU İŞLEM**\nBinlerce videoyu taşımak için:\n👉 @{OWNER_USERNAME}", reply_markup=back_btn)
+            try: await callback.message.edit_caption(f"📦 **TOPLU İŞLEM**\nBinlerce videoyu taşımak için:\n👉 @{OWNER_USERNAME}", reply_markup=back_btn)
+            except: await callback.message.edit_text(f"📦 **TOPLU İŞLEM**\nBinlerce videoyu taşımak için:\n👉 @{OWNER_USERNAME}", reply_markup=back_btn)
 
     except: await start_command(client, callback.message)
 
@@ -248,7 +271,6 @@ async def join_handler(client, message):
     try:
         await userbot.join_chat(message.text)
         await status.edit("✅ **GİRDİM!** Linki at.")
-        # Yeni bir gruba girdik, hafızayı tazeleyelim ki hemen tanısın
         await reload_userbot_cache()
     except UserAlreadyParticipant:
         await status.edit("✅ **Zaten içerideyim.** Linki at.")
@@ -282,7 +304,6 @@ async def process_link(client, message):
         try:
             target_msg = await userbot.get_messages(chat_id, msg_id)
         except (PeerIdInvalid, ChannelInvalid, ChannelPrivate):
-            # Bulamazsa son bir kez hafıza tazeleyip tekrar dener
             try:
                 await reload_userbot_cache()
                 target_msg = await userbot.get_messages(chat_id, msg_id)
@@ -293,7 +314,7 @@ async def process_link(client, message):
             return await status.edit("❌ İçerik yok.")
 
         path = await userbot.download_media(target_msg)
-        caption = "" if is_vip or user_id == OWNER_ID else "✅ **@YaelSaverBot ile indirildi.**\n💎 _Sınırsız indirme için VIP al!_"
+        caption = "" if is_vip or user_id == OWNER_ID else "✅ **@YaelSaverBot ile indirildi.**"
 
         if target_msg.video:
             await client.send_video(user_id, path, caption=caption, duration=target_msg.video.duration, width=target_msg.video.width, height=target_msg.video.height)
@@ -320,13 +341,10 @@ async def main():
     except: pass
     
     db_cache = await restore_data()
-    
-    # 🔥 AÇILIR AÇILMAZ HAFIZAYI DOLDUR (FIX)
     await reload_userbot_cache()
-    
     asyncio.create_task(backup_task())
     
-    print("✅ YAEL SAVER V8.0 AKTİF")
+    print("✅ YAEL SAVER V8.2 AKTİF")
     try: await idle()
     except: pass
     finally:
