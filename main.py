@@ -33,12 +33,15 @@ DB_FILE = "users_backup.json"
 BACKUP_INTERVAL = 3600 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV12")
+logger = logging.getLogger("YaelV12.5")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
+
 @app.route('/')
-def home(): return "Yael Saver V12.0 Active 🟢"
+def home():
+    return "Yael Saver V12.5 Active 🟢"
+
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -52,28 +55,39 @@ db_cache = {}
 is_dirty = False 
 
 async def restore_data():
-    if LOG_CHANNEL == 0: return {}
+    if LOG_CHANNEL == 0:
+        return {}
     try:
         async for msg in bot.get_chat_history(LOG_CHANNEL, limit=5):
             if msg.document and msg.document.file_name == "yael_db.json":
                 await bot.download_media(msg, file_name=DB_FILE)
-                with open(DB_FILE, "r") as f: return json.load(f)
-    except: pass
+                with open(DB_FILE, "r") as f:
+                    return json.load(f)
+    except:
+        pass
     return {}
 
 async def save_now(reason="Otomatik"):
     global is_dirty
     if LOG_CHANNEL != 0 and db_cache:
         try:
-            with open(DB_FILE, "w") as f: json.dump(db_cache, f, indent=4)
-            await bot.send_document(LOG_CHANNEL, document=DB_FILE, file_name="yael_db.json", caption=f"💾 Yedek ({reason})\n👥 Üye: {len(db_cache)}")
+            with open(DB_FILE, "w") as f:
+                json.dump(db_cache, f, indent=4)
+            await bot.send_document(
+                LOG_CHANNEL, 
+                document=DB_FILE, 
+                file_name="yael_db.json", 
+                caption=f"💾 Yedek ({reason})\n👥 Üye: {len(db_cache)}"
+            )
             is_dirty = False
-        except: pass
+        except:
+            pass
 
 async def backup_task():
     while True:
         await asyncio.sleep(BACKUP_INTERVAL)
-        if is_dirty: await save_now(reason="Saatlik")
+        if is_dirty:
+            await save_now(reason="Saatlik")
 
 async def check_expirations_task():
     while True:
@@ -85,14 +99,21 @@ async def check_expirations_task():
                     data["vip_until"] = 0
                     global is_dirty
                     is_dirty = True
-                    try: await bot.send_message(int(uid), "⏳ **PAKET SÜRENİZ DOLDU!**\nÜcretsiz deneme sürümüne geçtiniz.")
-                    except: pass
-        except: pass
+                    try:
+                        await bot.send_message(int(uid), "⏳ **PAKET SÜRENİZ DOLDU!**\nÜcretsiz deneme sürümüne geçtiniz.")
+                    except:
+                        pass
+        except:
+            pass
         await asyncio.sleep(BACKUP_INTERVAL)
 
+# 🔥 İŞTE O HATALI YER: ARTIK ALT ALTA VE TEMİZ 🔥
 async def reload_userbot_cache():
-    try: async for dialog in userbot.get_dialogs(): pass 
-    except: pass
+    try:
+        async for dialog in userbot.get_dialogs():
+            pass 
+    except:
+        pass
 
 # --- KULLANICI FONKSİYONLARI ---
 def get_user(user_id):
@@ -105,19 +126,24 @@ def get_user(user_id):
 
 def is_user_vip(user_id):
     u = get_user(user_id)
-    if u.get("vip_until", 0) > time.time(): return True
+    if u.get("vip_until", 0) > time.time():
+        return True
     return False
 
 def add_vip_days(user_id, days):
     global is_dirty
     uid = str(user_id)
-    if uid not in db_cache: get_user(uid)
+    if uid not in db_cache:
+        get_user(uid)
     current_expiry = db_cache[uid].get("vip_until", 0)
     now = time.time()
     
-    if days > 9000: new_expiry = now + (36500 * 86400) # Sınırsız
-    elif current_expiry > now: new_expiry = current_expiry + (days * 86400)
-    else: new_expiry = now + (days * 86400)
+    if days > 9000:
+        new_expiry = now + (36500 * 86400) # Sınırsız
+    elif current_expiry > now:
+        new_expiry = current_expiry + (days * 86400)
+    else:
+        new_expiry = now + (days * 86400)
         
     db_cache[uid]["vip_until"] = new_expiry
     is_dirty = True
@@ -127,7 +153,8 @@ def update_balance(user_id, amount):
     global is_dirty
     uid = str(user_id)
     if uid in db_cache:
-        if is_user_vip(user_id) and amount < 0: return 
+        if is_user_vip(user_id) and amount < 0:
+            return 
         db_cache[uid]["balance"] += amount
         is_dirty = True
 
@@ -135,15 +162,17 @@ def add_ref(user_id, referrer_id):
     global is_dirty
     uid = str(user_id)
     rid = str(referrer_id)
-    if uid == rid or uid not in db_cache: return False
+    if uid == rid or uid not in db_cache:
+        return False
     if db_cache[uid].get("invited_by") is None:
         db_cache[uid]["invited_by"] = rid
-        if rid in db_cache: db_cache[rid]["balance"] += 2
+        if rid in db_cache:
+            db_cache[rid]["balance"] += 2
         is_dirty = True
         return True
     return False
 
-# ==================== 🕹️ DETAYLI VE SÜSLÜ MENÜ TASARIMI ====================
+# ==================== 🕹️ DETAYLI MENÜ ====================
 def get_main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Linki Yapıştır & İndir", callback_data="manual_dl")],
@@ -172,9 +201,12 @@ def get_start_caption(first_name):
 
 async def smart_edit(message, text, reply_markup=None):
     try:
-        if message.photo: await message.edit_caption(caption=text, reply_markup=reply_markup)
-        else: await message.edit_text(text=text, reply_markup=reply_markup, disable_web_page_preview=True)
-    except: pass
+        if message.photo:
+            await message.edit_caption(caption=text, reply_markup=reply_markup)
+        else:
+            await message.edit_text(text=text, reply_markup=reply_markup, disable_web_page_preview=True)
+    except:
+        pass
 
 # ==================== 👑 YÖNETİCİ PANELİ ====================
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
@@ -193,9 +225,12 @@ async def add_vip_cmd(client, message):
         date_str = datetime.datetime.fromtimestamp(new_expiry).strftime('%d.%m.%Y')
         pack_name = "SINIRSIZ ELMAS PAKET 💎" if days > 9000 else f"{days} GÜNLÜK PRO PAKET"
         await message.reply(f"✅ `{uid}` -> {pack_name} tanımlandı.\n📅 Bitiş: {date_str}")
-        try: await client.send_message(int(uid), f"🎉 **TEBRİKLER!**\n\nHesabınıza **{pack_name}** tanımlandı.\n📅 Bitiş: {date_str}")
-        except: pass
-    except: await message.reply("❌ Hata: `/addvip ID GÜN`")
+        try:
+            await client.send_message(int(uid), f"🎉 **TEBRİKLER!**\n\nHesabınıza **{pack_name}** tanımlandı.\n📅 Bitiş: {date_str}")
+        except:
+            pass
+    except:
+        await message.reply("❌ Hata: `/addvip ID GÜN`")
 
 @bot.on_message(filters.command("delvip") & filters.user(OWNER_ID))
 async def del_vip_cmd(client, message):
@@ -206,7 +241,8 @@ async def del_vip_cmd(client, message):
             global is_dirty
             is_dirty = True
             await message.reply(f"❌ `{uid}` paketi iptal edildi.")
-    except: pass
+    except:
+        pass
 
 @bot.on_message(filters.command("add") & filters.user(OWNER_ID))
 async def add_bal_cmd(client, message):
@@ -215,11 +251,13 @@ async def add_bal_cmd(client, message):
         get_user(uid)
         update_balance(uid, int(amt))
         await message.reply(f"✅ `{uid}` -> +{amt} Hak.")
-    except: pass
+    except:
+        pass
 
 @bot.on_message(filters.command("duyuru") & filters.user(OWNER_ID))
 async def broadcast_cmd(client, message):
-    if len(message.command) < 2: return await message.reply("❌ Mesaj yaz.")
+    if len(message.command) < 2:
+        return await message.reply("❌ Mesaj yaz.")
     text = message.text.split(None, 1)[1]
     msg = await message.reply("📢 Gönderiliyor...")
     c = 0
@@ -228,10 +266,11 @@ async def broadcast_cmd(client, message):
             await client.send_message(int(uid), f"📢 **DUYURU**\n\n{text}")
             c += 1
             await asyncio.sleep(0.05)
-        except: pass
+        except:
+            pass
     await msg.edit(f"✅ **{c} Kişiye ulaştı.**")
 
-# ==================== 🚀 ARAYÜZ (V12.0 ULTIMATE) ====================
+# ==================== 🚀 ARAYÜZ (V12.5) ====================
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
     try:
@@ -242,16 +281,20 @@ async def start_command(client, message):
             try:
                 ref_id = message.command[1]
                 if add_ref(user_id, ref_id):
-                    try: await client.send_message(int(ref_id), f"🔥 **Yeni Referans!**\nArkadaşın katıldı, +2 Hak kazandın!")
-                    except: pass
-            except: pass
+                    try:
+                        await client.send_message(int(ref_id), f"🔥 **Yeni Referans!**\nArkadaşın katıldı, +2 Hak kazandın!")
+                    except:
+                        pass
+            except:
+                pass
         
         caption_text = get_start_caption(first_name)
         try:
             await message.reply_photo(photo=BOT_IMAGE, caption=caption_text, reply_markup=get_main_menu())
         except:
             await message.reply(text=caption_text, reply_markup=get_main_menu())
-    except: pass
+    except:
+        pass
 
 @bot.on_callback_query()
 async def cb_handler(client, callback):
@@ -301,7 +344,7 @@ async def cb_handler(client, callback):
         await smart_edit(callback.message, text, back_btn)
 
     elif data == "invite_friend":
-        # 🔥 REFERANS FIX: Her seferinde botun adını taze çeker
+        # REFERANS FIX
         try:
             me = await client.get_me()
             bot_username = me.username
@@ -440,36 +483,47 @@ async def process_link(client, message):
         path = await userbot.download_media(target_msg)
         caption_on_media = "" if vip_status or user_id == OWNER_ID else "✅ **@YaelSaverBot ile indirildi.**"
 
-        if target_msg.video: await client.send_video(user_id, path, caption=caption_on_media, duration=target_msg.video.duration, width=target_msg.video.width, height=target_msg.video.height)
-        elif target_msg.photo: await client.send_photo(user_id, path, caption=caption_on_media)
-        elif target_msg.document: await client.send_document(user_id, path, caption=caption_on_media)
+        if target_msg.video:
+            await client.send_video(user_id, path, caption=caption_on_media, duration=target_msg.video.duration, width=target_msg.video.width, height=target_msg.video.height)
+        elif target_msg.photo:
+            await client.send_photo(user_id, path, caption=caption_on_media)
+        elif target_msg.document:
+            await client.send_document(user_id, path, caption=caption_on_media)
 
         if not vip_status and user_id != OWNER_ID:
             update_balance(user_id, -1)
             await client.send_message(user_id, f"📉 **Kalan Hakkın:** `{u['balance']}`\n⚡ _Sınırsız indirme için PRO PAKET al!_")
 
-        if os.path.exists(path): os.remove(path)
+        if os.path.exists(path):
+            os.remove(path)
         await status.delete()
 
     except Exception as e:
         await status.edit(f"❌ **Beklenmeyen Hata:**\n{e}")
-        if 'path' in locals() and os.path.exists(path): os.remove(path)
+        if 'path' in locals() and os.path.exists(path):
+            os.remove(path)
 
 # ==================== BAŞLATMA ====================
 async def main():
     global db_cache
     print("🤖 Başlatılıyor...")
-    try: await bot.start()
-    except: pass
-    try: await userbot.start()
-    except: pass
+    try:
+        await bot.start()
+    except:
+        pass
+    try:
+        await userbot.start()
+    except:
+        pass
     db_cache = await restore_data()
     await reload_userbot_cache()
     asyncio.create_task(backup_task())
     asyncio.create_task(check_expirations_task())
-    print("✅ YAEL SAVER V12.0 ULTIMATE ACTIVE")
-    try: await idle()
-    except: pass
+    print("✅ YAEL SAVER V12.5 EXPANDED ACTIVE")
+    try:
+        await idle()
+    except:
+        pass
     finally:
         await save_now(reason="Kapanış")
         await bot.stop()
