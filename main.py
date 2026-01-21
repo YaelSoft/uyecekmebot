@@ -5,7 +5,7 @@ from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait, RPCError, PeerIdInvalid, ChannelInvalid, ChannelPrivate
+from pyrogram.errors import FloodWait, RPCError, PeerIdInvalid
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # ==================== ⚙️ AYARLAR ====================
@@ -16,18 +16,14 @@ SESSION_STRING = os.environ.get("SESSION_STRING", "")
 MONGO_URL = os.environ.get("MONGO_URL", "")
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 
-# REFERANS AYARLARI
-START_BALANCE = 3       
-REF_REWARD = 2          
-
 # LOGLAMA
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelAntiCrash")
+logger = logging.getLogger("YaelFinal")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver System Online 🟢"
+def home(): return "Yael System Active 🟢"
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -37,37 +33,33 @@ bot = Client("sales_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN,
 userbot = Client("sales_userbot", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
 
 # ==================== 💾 MONGODB ====================
-if not MONGO_URL:
-    print("❌ HATA: MONGO_URL EKLENMEMİŞ!")
-    exit(1)
-
+if not MONGO_URL: exit(1)
 mongo_client = AsyncIOMotorClient(MONGO_URL)
 db = mongo_client["yael_saver_db"]
 users_col = db["users"]
 
-# --- FONKSİYONLAR ---
+# --- YARDIMCI FONKSİYONLAR ---
 async def get_user(user_id):
     user = await users_col.find_one({"user_id": user_id})
     if not user:
-        user = {"user_id": user_id, "balance": START_BALANCE, "invited_by": None, "total_refs": 0}
+        user = {"user_id": user_id, "balance": 3, "invited_by": None, "total_refs": 0}
         await users_col.insert_one(user)
     return user
 
 async def update_balance(user_id, amount):
     await users_col.update_one({"user_id": user_id}, {"$inc": {"balance": amount}})
 
-async def add_ref(user_id, referrer_id, client):
-    if str(user_id) == str(referrer_id): return False
-    user = await get_user(user_id)
-    if user.get("invited_by"): return False 
+# ==================== 🔥 KRİTİK FONKSİYON: HAFIZA YÜKLEME ====================
+async def reload_dialogs():
+    """Userbot'un olduğu tüm kanalları hafızaya alır"""
+    print("🔄 Userbot kanalları tanıyor... (Bu 10-20 saniye sürebilir)")
     try:
-        u_info = await client.get_users(user_id)
-        if not u_info.username: return False 
-    except: return False
-
-    await users_col.update_one({"user_id": user_id}, {"$set": {"invited_by": referrer_id}})
-    await users_col.update_one({"user_id": referrer_id}, {"$inc": {"balance": REF_REWARD, "total_refs": 1}})
-    return True
+        # Userbot'un dialog listesini çekiyoruz ki ID'leri öğrensin
+        async for dialog in userbot.get_dialogs():
+            pass 
+        print("✅ Userbot hafızası tazelendi! Artık kanalları tanıyor.")
+    except Exception as e:
+        print(f"⚠️ Hafıza tazelenirken hata: {e}")
 
 # ==================== 🚀 KOMUTLAR ====================
 
@@ -75,39 +67,34 @@ async def add_ref(user_id, referrer_id, client):
 async def start_command(client, message):
     user_id = message.from_user.id
     username = message.from_user.username
-    args = message.command
     await get_user(user_id)
     
-    if len(args) > 1:
+    # Referans (Basitleştirildi)
+    if len(message.command) > 1:
         try:
-            referrer_id = int(args[1])
-            success = await add_ref(user_id, referrer_id, client)
-            if success:
-                try:
-                    await client.send_message(referrer_id, f"🎁 **TEBRİKLER!**\nArkadaşın geldi, +{REF_REWARD} Hak kazandın!")
-                except: pass
+            ref_id = int(message.command[1])
+            if str(user_id) != str(ref_id):
+                u = await get_user(user_id)
+                if not u.get("invited_by"):
+                    await users_col.update_one({"user_id": user_id}, {"$set": {"invited_by": ref_id}})
+                    await users_col.update_one({"user_id": ref_id}, {"$inc": {"balance": 2}})
         except: pass
 
     user_data = await get_user(user_id)
     btn = InlineKeyboardMarkup([
         [InlineKeyboardButton("💎 Hesabım", callback_data="my_account")],
         [InlineKeyboardButton("🚀 VIP Al", url=f"https://t.me/{username if username else 'yasin33'}")],
-        [InlineKeyboardButton("❓ Yardım", callback_data="help")]
     ])
-    await message.reply(f"👋 **Selam {message.from_user.first_name}!**\n💰 **Hakkın:** `{user_data['balance']}`", reply_markup=btn)
+    await message.reply(f"👋 **Selam!**\n💰 **Hakkın:** `{user_data['balance']}`", reply_markup=btn)
 
 @bot.on_callback_query()
 async def callback_handler(client, callback):
-    data = callback.data
-    user_id = callback.from_user.id
-    user_data = await get_user(user_id)
-
-    if data == "my_account":
-        ref_link = f"https://t.me/{client.me.username}?start={user_id}"
-        await callback.message.edit(f"💰 **Bakiye:** `{user_data['balance']}`\n🔗 **Link:**\n`{ref_link}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
-    elif data == "help":
-        await callback.message.edit("Linki yapıştır, gerisini bana bırak.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
-    elif data == "back_home":
+    if callback.data == "my_account":
+        user_id = callback.from_user.id
+        u = await get_user(user_id)
+        link = f"https://t.me/{client.me.username}?start={user_id}"
+        await callback.message.edit(f"💰 Bakiye: {u['balance']}\n🔗 Link: `{link}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back")]]))
+    elif callback.data == "back":
         await start_command(client, callback.message)
 
 @bot.on_message(filters.regex(r"https://t.me/") & filters.private)
@@ -134,56 +121,53 @@ async def process_link(client, message):
             chat_id = parts[0]
             msg_id = int(parts[1].split("?")[0])
 
-        # 🔥 KRİTİK NOKTA: KANAL KONTROLÜ
-        # Önce mesajı getirmeye çalış, hata verirse yakala
+        # Mesajı Getir
         try:
             target_msg = await userbot.get_messages(chat_id, msg_id)
-        except (PeerIdInvalid, ChannelInvalid, ChannelPrivate):
-            await status_msg.edit(
-                f"❌ **ERİŞİM HATASI!**\n\n"
-                f"Userbot bu kanalı tanımıyor (`{chat_id}`).\n"
-                f"Lütfen Userbot hesabınızla bu kanala katılın veya mesaj geçmişini güncelleyin."
-            )
-            return
-        except Exception as e:
-            await status_msg.edit(f"❌ Mesaj alınamadı: {e}")
-            return
+        except PeerIdInvalid:
+            # Eğer hala tanımıyorsa, son bir kez zorla tanıtmaya çalış
+            try:
+                await userbot.resolve_peer(chat_id)
+                target_msg = await userbot.get_messages(chat_id, msg_id)
+            except:
+                return await status_msg.edit(f"❌ **HATA:** Userbot bu kanalda ({chat_id}) ÜYE DEĞİL.\nLütfen Userbot hesabınızla kanala katılın.")
         
         if not target_msg or not (target_msg.video or target_msg.photo or target_msg.document):
             return await status_msg.edit("❌ İçerik bulunamadı.")
 
         file_path = await userbot.download_media(target_msg)
         
+        caption = "✅ **Yael Saver**"
         if target_msg.video:
-            await client.send_video(user_id, video=file_path, caption="✅ Yael Saver", duration=target_msg.video.duration, width=target_msg.video.width, height=target_msg.video.height)
+            await client.send_video(user_id, video=file_path, caption=caption, duration=target_msg.video.duration, width=target_msg.video.width, height=target_msg.video.height)
         elif target_msg.photo:
-            await client.send_photo(user_id, photo=file_path, caption="✅ Yael Saver")
+            await client.send_photo(user_id, photo=file_path, caption=caption)
         elif target_msg.document:
-            await client.send_document(user_id, document=file_path, caption="✅ Yael Saver")
+            await client.send_document(user_id, document=file_path, caption=caption)
 
-        if user_id != OWNER_ID:
-            await update_balance(user_id, -1)
-            
+        if user_id != OWNER_ID: await update_balance(user_id, -1)
         if os.path.exists(file_path): os.remove(file_path)
         await status_msg.delete()
 
     except Exception as e:
-        # Genel Hata Yakalayıcı (Bot Çökmez, Hata Yazar)
-        error_text = str(e)
-        if "Peer id invalid" in error_text:
-            await status_msg.edit("❌ **Hata:** Userbot kanalı bulamıyor. Kanala katıldığından emin ol.")
-        else:
-            await status_msg.edit(f"❌ **Bilinmeyen Hata:** {e}")
-            
+        await status_msg.edit(f"❌ Hata: {e}")
         if 'file_path' in locals() and os.path.exists(file_path): os.remove(file_path)
 
-# ==================== 🔥 BAŞLATMA ====================
+# ==================== 🔥 BAŞLATMA (GÜÇLENDİRİLMİŞ) ====================
 async def main():
     print("🤖 Başlatılıyor...")
-    try: await bot.start()
+    
+    # 1. Botları Başlat
+    try: await bot.start(); print("✅ Bot Aktif")
     except: pass
-    try: await userbot.start()
+    
+    try: await userbot.start(); print("✅ Userbot Aktif")
     except: pass
+
+    # 2. 🔥 HAFIZA TAZELEME (SORUNU ÇÖZEN KISIM)
+    await reload_dialogs()
+
+    # 3. Bekle
     await idle()
     await bot.stop()
     await userbot.stop()
