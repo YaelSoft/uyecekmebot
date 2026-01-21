@@ -17,7 +17,7 @@ OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) 
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 
-# 🔥 SENİN GITHUB RESMİN (RAW LİNK)
+# 🔥 RESİM LİNKİ (GitHub Raw)
 BOT_IMAGE = "https://github.com/YaelSoft/uyecekmebot/raw/a946c9c8f33435a5f6ff9ee65bcfd353f5156d9b/logo.jpeg"
 
 # FİYAT VE ÖDÜL
@@ -31,12 +31,12 @@ DB_FILE = "users_backup.json"
 BACKUP_INTERVAL = 3600 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelFinal")
+logger = logging.getLogger("YaelPro")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V8.2 Active 🟢"
+def home(): return "Yael Saver V8.3 Active 🟢"
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -74,11 +74,9 @@ async def backup_task():
         if is_dirty: await save_now(reason="Saatlik")
 
 async def reload_userbot_cache():
-    """Hafıza Tazeleme"""
     print("🔄 Userbot hafızası tazeleniyor...")
     try:
         async for dialog in userbot.get_dialogs(): pass 
-        print("✅ Hafıza güncel.")
     except: pass
 
 # --- KULLANICI FONKSİYONLARI ---
@@ -117,58 +115,67 @@ def add_ref(user_id, referrer_id):
         return True
     return False
 
+# ==================== 🛠️ AKILLI MENÜ MOTORU (HATA ÖNLEYİCİ) ====================
+async def smart_edit(message, text, reply_markup=None):
+    """
+    Bu fonksiyon mesajın resimli mi yoksa sadece yazı mı olduğunu kontrol eder.
+    Böylece 'Resim yüklenemedi' hatası asla oluşmaz.
+    """
+    try:
+        if message.photo:
+            await message.edit_caption(caption=text, reply_markup=reply_markup)
+        else:
+            await message.edit_text(text=text, reply_markup=reply_markup, disable_web_page_preview=True)
+    except Exception as e:
+        print(f"Smart Edit Hatası: {e}")
+
 # ==================== 👑 YÖNETİCİ PANELİ ====================
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
 async def admin_panel(client, message):
     total = len(db_cache)
     vips = sum(1 for u in db_cache.values() if u.get("is_vip"))
-    
-    text = (
-        f"👑 **PATRON PANELİ**\n\n"
-        f"👥 Üye: `{total}` | 🌟 VIP: `{vips}`\n"
-        f"💾 Durum: {'⚠️ Bekliyor' if is_dirty else '✅ Güncel'}\n\n"
-        f"__Komutlar:__\n"
-        f"• `/addvip ID`\n• `/delvip ID`\n• `/add ID MİKTAR`\n• `/duyuru MESAJ`"
-    )
+    text = (f"👑 **PATRON PANELİ**\n\n👥 Üye: `{total}`\n🌟 VIP: `{vips}`\n💾 Kayıt: {'⚠️ Bekliyor' if is_dirty else '✅ Tamam'}\n\n"
+            f"⚙️ `/addvip ID`\n⚙️ `/delvip ID`\n⚙️ `/add ID MİKTAR`\n⚙️ `/duyuru MESAJ`")
     await message.reply(text)
 
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def add_vip_cmd(client, message):
     try:
-        target_id = message.command[1]
-        if target_id not in db_cache: get_user(target_id)
-        set_vip(target_id, True)
-        await message.reply(f"✅ `{target_id}` -> VIP yapıldı.")
+        uid = message.command[1]
+        get_user(uid)
+        set_vip(uid, True)
+        await message.reply(f"✅ `{uid}` artık VIP.")
     except: pass
 
 @bot.on_message(filters.command("add") & filters.user(OWNER_ID))
 async def add_bal_cmd(client, message):
     try:
         _, uid, amt = message.text.split()
-        if uid not in db_cache: get_user(uid)
+        get_user(uid)
         update_balance(uid, int(amt))
         await message.reply(f"✅ `{uid}` -> +{amt} Hak.")
     except: pass
 
 @bot.on_message(filters.command("duyuru") & filters.user(OWNER_ID))
 async def broadcast_cmd(client, message):
-    if len(message.command) < 2: return await message.reply("❌ Mesaj yok.")
+    if len(message.command) < 2: return await message.reply("❌ Mesaj yaz.")
     text = message.text.split(None, 1)[1]
     msg = await message.reply("📢 Gönderiliyor...")
-    sent = 0
+    c = 0
     for uid in db_cache.keys():
         try:
             await client.send_message(int(uid), f"📢 **DUYURU**\n\n{text}")
-            sent += 1
+            c += 1
             await asyncio.sleep(0.05)
         except: pass
-    await msg.edit(f"✅ **Tamamlandı!**\nUlaşan: {sent}")
+    await msg.edit(f"✅ **{c} Kişiye ulaştı.**")
 
-# ==================== 🚀 KULLANICI ARAYÜZÜ ====================
+# ==================== 🚀 KULLANICI ARAYÜZÜ (V8.3 PRO) ====================
 
 def get_main_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("👤 Hesabım", callback_data="my_account"), InlineKeyboardButton("👥 Davet Et (+2 Hak)", callback_data="invite_friend")],
+        [InlineKeyboardButton("📥 Link Gönder (İndir)", callback_data="manual_dl")], # YENİ BUTON
+        [InlineKeyboardButton("👤 Hesabım", callback_data="my_account"), InlineKeyboardButton("👥 Referans (+2 Hak)", callback_data="invite_friend")],
         [InlineKeyboardButton("❓ Nasıl Kullanılır?", callback_data="how_to"), InlineKeyboardButton("📦 Toplu Transfer", callback_data="bulk_info")],
         [InlineKeyboardButton("💎 VIP AL (Sınırsız)", callback_data="buy_vip")]
     ])
@@ -188,24 +195,20 @@ async def start_command(client, message):
                     except: pass
             except: pass
 
-        # 🔥 RESİMLİ MENÜ (Senin Linkinle)
-        await message.reply_photo(
-            photo=BOT_IMAGE,
-            caption=(
-                f"👋 **Hoş Geldin, {first_name}!**\n\n"
-                f"🤖 **Yael Saver** sistemine bağlandın.\n"
-                f"Telegram'ın en gelişmiş içerik indirme asistanıyım.\n\n"
-                f"👇 **Ne yapmak istersin?**"
-            ),
-            reply_markup=get_main_menu()
-        )
+        # Resmi dene, olmazsa yazıya dön (Hata vermez)
+        try:
+            await message.reply_photo(
+                photo=BOT_IMAGE,
+                caption=f"👋 **Hoş Geldin, {first_name}!**\n\n🤖 **Yael Saver** sistemine bağlandın.\nGizli gruplardan içerik indiren tek botsun.\n\n👇 **Menüden işlem seç:**",
+                reply_markup=get_main_menu()
+            )
+        except:
+            await message.reply(
+                f"👋 **Hoş Geldin, {first_name}!**\n\n🤖 **Yael Saver** sistemine bağlandın.\nGizli gruplardan içerik indiren tek bot.\n\n👇 **Menüden işlem seç:**",
+                reply_markup=get_main_menu()
+            )
     except Exception as e:
         print(f"Start Hatası: {e}")
-        # Resim hatası olursa yedek plan (Yazı)
-        await message.reply(
-            f"👋 **Hoş Geldin, {first_name}!**\n(Resim yüklenemedi ama sistem aktif)\n\n👇 **Menü:**",
-            reply_markup=get_main_menu()
-        )
 
 @bot.on_callback_query()
 async def cb_handler(client, callback):
@@ -214,55 +217,90 @@ async def cb_handler(client, callback):
     u = get_user(user_id)
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]])
 
-    try:
-        if data == "back_home":
-            await callback.message.delete()
-            await client.send_photo(
-                user_id,
-                photo=BOT_IMAGE,
-                caption="👋 **Ana Menüdesin.**\n👇 İşlem seç:",
-                reply_markup=get_main_menu()
-            )
+    # Ana Menüye Dönüş (Resmi Yeniler)
+    if data == "back_home":
+        await callback.message.delete()
+        try:
+            await client.send_photo(user_id, photo=BOT_IMAGE, caption="👋 **Ana Menüdesin.**\n👇 İşlem seç:", reply_markup=get_main_menu())
+        except:
+            await client.send_message(user_id, "👋 **Ana Menüdesin.**\n👇 İşlem seç:", reply_markup=get_main_menu())
+        return
 
-        elif data == "my_account":
-            is_vip = u.get("is_vip", False)
-            status = "👑 VIP" if is_vip else "👤 Standart"
-            bal = "♾️ Sınırsız" if is_vip else f"{u['balance']} Dosya"
-            link = f"https://t.me/{client.me.username}?start={user_id}"
-            
-            text = f"👤 **HESAP**\n🆔 `{user_id}`\n🛡 {status}\n💰 {bal}\n🔗 `{link}`"
-            # Resim varsa edit_caption kullanılır
-            try: await callback.message.edit_caption(caption=text, reply_markup=back_btn)
-            except: await callback.message.edit_text(text, reply_markup=back_btn)
+    # --- AKILLI MENÜ İŞLEMLERİ ---
+    
+    if data == "my_account":
+        is_vip = u.get("is_vip", False)
+        status = "👑 VIP ÜYE (Sınırsız)" if is_vip else "👤 STANDART ÜYE"
+        bal = "♾️" if is_vip else f"{u['balance']}"
+        ref_count = 0 # Basit tutmak için
+        
+        # PROFESYONEL TASARIM
+        text = (
+            f"👤 **HESAP DETAYLARI**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🆔 **Kullanıcı ID:** `{user_id}`\n"
+            f"🏷️ **Ad:** {callback.from_user.first_name}\n\n"
+            f"🔰 **Üyelik Durumu:**\n"
+            f"╰ {status}\n\n"
+            f"💼 **Mevcut Bakiye:**\n"
+            f"╰ `{bal}` İndirme Hakkı\n\n"
+            f"🔗 **Referans Bağlantın:**\n"
+            f"`https://t.me/{client.me.username}?start={user_id}`"
+        )
+        await smart_edit(callback.message, text, back_btn)
 
-        elif data == "invite_friend":
-            link = f"https://t.me/{client.me.username}?start={user_id}"
-            share_text = f"🔓 **Yasaklı gruplardan indiren botu buldum!**\n3 Hak bedava veriyor. Dene: {link}"
-            url = f"https://t.me/share/url?url={share_text}"
-            text = f"🎁 **BEDAVA HAK KAZAN!**\nHer arkadaşın için **+{REF_REWARD} HAK** kazan.\n👇 Paylaş:"
-            btns = InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=url)], [InlineKeyboardButton("🔙 Geri", callback_data="back_home")]])
-            try: await callback.message.edit_caption(caption=text, reply_markup=btns)
-            except: await callback.message.edit_text(text, reply_markup=btns)
+    elif data == "invite_friend":
+        link = f"https://t.me/{client.me.username}?start={user_id}"
+        share_text = f"🔓 **Yasaklı Telegram gruplarından indirme yapan bot!**\n3 Hak ücretsiz veriyor, dene bence: {link}"
+        url = f"https://t.me/share/url?url={share_text}"
+        
+        text = (
+            f"👥 **REFERANS SİSTEMİ**\n\n"
+            f"Arkadaşlarını davet et, kazan!\n"
+            f"Her davet ettiğin kişi için **+{REF_REWARD} İndirme Hakkı** kazanırsın.\n\n"
+            f"👇 **Hemen Paylaş:**"
+        )
+        btns = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 Arkadaşına Gönder", url=url)],
+            [InlineKeyboardButton("🔙 Geri Dön", callback_data="back_home")]
+        ])
+        await smart_edit(callback.message, text, btns)
 
-        elif data == "buy_vip":
-            text = f"💎 **VIP AL**\n✅ Sınırsız İndirme\n✅ Reklamsız\n\n👇 Ödeme Yöntemi:"
-            btns = InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⭐ {VIP_PRICE_STARS}", url=f"https://t.me/{OWNER_USERNAME}")],
-                [InlineKeyboardButton(f"💳 {VIP_PRICE_TL}", url=f"https://t.me/{OWNER_USERNAME}")],
-                [InlineKeyboardButton("🔙 İptal", callback_data="back_home")]
-            ])
-            try: await callback.message.edit_caption(caption=text, reply_markup=btns)
-            except: await callback.message.edit_text(text, reply_markup=btns)
+    elif data == "manual_dl":
+        text = (
+            f"📥 **İÇERİK İNDİRME**\n\n"
+            f"1️⃣ İndirmek istediğin içeriğin **Bağlantısını (Link)** kopyala.\n"
+            f"2️⃣ Bu sohbete yapıştır ve gönder.\n\n"
+            f"🛑 **Uyarı:** Eğer bot 'Erişim Yok' derse, önce o grubun **Davet Linkini (Invite Link)** at."
+        )
+        await smart_edit(callback.message, text, back_btn)
 
-        elif data == "how_to":
-            try: await callback.message.edit_caption("❓ **NASIL?**\n1. Linki kopyala.\n2. Buraya yapıştır.\n⚠️ Hata alırsan önce **Davet Linkini** at.", reply_markup=back_btn)
-            except: await callback.message.edit_text("❓ **NASIL?**\n1. Linki kopyala.\n2. Buraya yapıştır.\n⚠️ Hata alırsan önce **Davet Linkini** at.", reply_markup=back_btn)
+    elif data == "buy_vip":
+        text = (
+            f"💎 **VIP ÜYELİK SATIN AL**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"✅ Sınırsız İndirme Hakkı\n"
+            f"✅ Reklamsız, Temiz İçerik\n"
+            f"✅ Öncelikli Hız\n\n"
+            f"💰 **Fiyatlar:**\n"
+            f"• {VIP_PRICE_TL} (Havale/Kripto)\n"
+            f"• {VIP_PRICE_STARS} (Telegram Yıldız)\n\n"
+            f"👇 **Ödeme Yöntemi Seç:**"
+        )
+        btns = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"⭐ {VIP_PRICE_STARS} ile Al", url=f"https://t.me/{OWNER_USERNAME}")],
+            [InlineKeyboardButton(f"💳 {VIP_PRICE_TL} ile Al", url=f"https://t.me/{OWNER_USERNAME}")],
+            [InlineKeyboardButton("🔙 İptal", callback_data="back_home")]
+        ])
+        await smart_edit(callback.message, text, btns)
 
-        elif data == "bulk_info":
-            try: await callback.message.edit_caption(f"📦 **TOPLU İŞLEM**\nBinlerce videoyu taşımak için:\n👉 @{OWNER_USERNAME}", reply_markup=back_btn)
-            except: await callback.message.edit_text(f"📦 **TOPLU İŞLEM**\nBinlerce videoyu taşımak için:\n👉 @{OWNER_USERNAME}", reply_markup=back_btn)
+    elif data == "how_to":
+        text = "❓ **NASIL KULLANILIR?**\n\n1. Linki kopyala.\n2. Buraya yapıştır.\n3. Bot indirsin.\n\n⚠️ Gizli grup hatası alırsan önce grubun **Davet Linkini** at."
+        await smart_edit(callback.message, text, back_btn)
 
-    except: await start_command(client, callback.message)
+    elif data == "bulk_info":
+        text = f"📦 **TOPLU İŞLEM**\n\nBinlerce videoyu kopyalamak veya taşımak mı istiyorsun?\nAdmin ile görüş: @{OWNER_USERNAME}"
+        await smart_edit(callback.message, text, back_btn)
 
 # ==================== 🔗 İŞLEM MERKEZİ ====================
 @bot.on_message(filters.regex(r"https://t.me/\+") | filters.regex(r"https://t.me/joinchat/"))
@@ -270,7 +308,7 @@ async def join_handler(client, message):
     status = await message.reply("🔓 **Gizli Link!** Userbot deniyor...")
     try:
         await userbot.join_chat(message.text)
-        await status.edit("✅ **GİRDİM!** Linki at.")
+        await status.edit("✅ **GİRDİM!** Şimdi içerik linkini atabilirsin.")
         await reload_userbot_cache()
     except UserAlreadyParticipant:
         await status.edit("✅ **Zaten içerideyim.** Linki at.")
@@ -285,7 +323,7 @@ async def process_link(client, message):
     is_vip = u.get("is_vip", False)
 
     if not is_vip and u["balance"] <= 0 and user_id != OWNER_ID:
-        return await message.reply(f"⛔ **Hakkın Bitti!**\nDavet et veya VIP al.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 VIP AL", callback_data="buy_vip")]]))
+        return await message.reply(f"⛔ **Hakkın Bitti!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 VIP AL", callback_data="buy_vip")]]))
 
     status = await message.reply("⏳ **İşleniyor...**")
     
@@ -344,7 +382,7 @@ async def main():
     await reload_userbot_cache()
     asyncio.create_task(backup_task())
     
-    print("✅ YAEL SAVER V8.2 AKTİF")
+    print("✅ YAEL SAVER V8.3 PRO AKTİF")
     try: await idle()
     except: pass
     finally:
