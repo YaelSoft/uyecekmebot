@@ -33,12 +33,12 @@ DB_FILE = "users_backup.json"
 BACKUP_INTERVAL = 3600 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV10.5")
+logger = logging.getLogger("YaelV10.6")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V10.5 Active 🟢"
+def home(): return "Yael Saver V10.6 Active 🟢"
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -85,14 +85,20 @@ async def check_expirations_task():
                     data["vip_until"] = 0
                     global is_dirty
                     is_dirty = True
-                    try: await bot.send_message(int(uid), "⏳ **PAKET SÜRENİZ DOLDU!**\nÜcretsiz deneme sürümüne geçtiniz.")
-                    except: pass
+                    try: 
+                        await bot.send_message(int(uid), "⏳ **PAKET SÜRENİZ DOLDU!**\nÜcretsiz deneme sürümüne geçtiniz.")
+                    except: 
+                        pass
         except: pass
         await asyncio.sleep(BACKUP_INTERVAL)
 
+# 🔥 DÜZELTİLEN KISIM: Kodlar alt alta yazıldı
 async def reload_userbot_cache():
-    try: async for dialog in userbot.get_dialogs(): pass 
-    except: pass
+    try: 
+        async for dialog in userbot.get_dialogs(): 
+            pass 
+    except: 
+        pass
 
 # --- KULLANICI FONKSİYONLARI ---
 def get_user(user_id):
@@ -143,9 +149,8 @@ def add_ref(user_id, referrer_id):
         return True
     return False
 
-# ==================== 🕹️ ANA MENÜ (TEK MERKEZ) ====================
+# ==================== 🕹️ ANA MENÜ ====================
 def get_main_menu():
-    """Tüm menülerin tek kaynağı - Değişiklikler buradan yapılır"""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📥 Linki Buraya Yapıştır (İndir)", callback_data="manual_dl")],
         [InlineKeyboardButton("👤 Hesabım", callback_data="my_account"), InlineKeyboardButton("🎁 Referans (+2 Hak)", callback_data="invite_friend")],
@@ -248,7 +253,6 @@ async def cb_handler(client, callback):
     u = get_user(user_id)
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]])
 
-    # 🔥 KRİTİK DÜZELTME: Ana Menüye dönerken resmi silip sıfırdan atar.
     if data == "back_home":
         await callback.message.delete()
         try:
@@ -282,7 +286,7 @@ async def cb_handler(client, callback):
 
     elif data == "invite_friend":
         try: bot_username = (await client.get_me()).username
-        except: bot_username = "YaelSaverBot"
+        except: bot_username = OWNER_USERNAME
         link = f"https://t.me/{bot_username}?start={user_id}"
         share_text = f"🔥 **Yael Saver ile gizli içerikleri indir!**\n\nÜcretsiz deneme hakkı veriyor.\n\n👇 Hemen dene:\n{link}"
         url = f"https://t.me/share/url?url={share_text}"
@@ -385,7 +389,7 @@ async def main():
     await reload_userbot_cache()
     asyncio.create_task(backup_task())
     asyncio.create_task(check_expirations_task())
-    print("✅ YAEL SAVER V10.5 ACTIVE")
+    print("✅ YAEL SAVER V10.6 FINAL FIXED")
     try: await idle()
     except: pass
     finally:
