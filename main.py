@@ -5,15 +5,16 @@ from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import FloodWait, RPCError, PeerIdInvalid, ChannelInvalid, ChannelPrivate
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# ==================== ⚙️ AYARLAR (RENDER) ====================
+# ==================== ⚙️ AYARLAR ====================
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 MONGO_URL = os.environ.get("MONGO_URL", "")
-OWNER_ID = int(os.environ.get("OWNER_ID", "0")) # 🔥 EKLENDİ: SENİN ID'N
+OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 
 # REFERANS AYARLARI
 START_BALANCE = 3       
@@ -21,9 +22,9 @@ REF_REWARD = 2
 
 # LOGLAMA
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelProBot")
+logger = logging.getLogger("YaelAntiCrash")
 
-# ==================== 🌐 WEB SERVER (ARKAPLAN) ====================
+# ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Yael Saver System Online 🟢"
@@ -68,39 +69,7 @@ async def add_ref(user_id, referrer_id, client):
     await users_col.update_one({"user_id": referrer_id}, {"$inc": {"balance": REF_REWARD, "total_refs": 1}})
     return True
 
-# ==================== 👑 ADMIN KOMUTLARI (YENİ) ====================
-
-@bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
-async def admin_panel(client, message):
-    """Sadece Owner'ın göreceği panel"""
-    count = await users_col.count_documents({})
-    text = (
-        f"👑 **YÖNETİCİ PANELİ**\n\n"
-        f"👥 **Toplam Kullanıcı:** {count}\n"
-        f"⚙️ **Sistem:** Aktif\n\n"
-        f"__Bakiye eklemek için:__\n`/add 123456 10` (ID ve Miktar)"
-    )
-    await message.reply(text)
-
-@bot.on_message(filters.command("add") & filters.user(OWNER_ID))
-async def admin_add_balance(client, message):
-    """Elle bakiye ekleme komutu"""
-    try:
-        _, target_id, amount = message.text.split()
-        target_id = int(target_id)
-        amount = int(amount)
-        
-        await update_balance(target_id, amount)
-        await message.reply(f"✅ `{target_id}` kullanıcısına **{amount} hak** eklendi.")
-        
-        # Kullanıcıya haber ver
-        try:
-            await client.send_message(target_id, f"🎁 **YÖNETİCİ HEDİYESİ!**\nHesabına +{amount} hak yüklendi.")
-        except: pass
-    except:
-        await message.reply("❌ Hatalı kullanım! Örnek: `/add 12345678 50`")
-
-# ==================== 🚀 KULLANICI KOMUTLARI ====================
+# ==================== 🚀 KOMUTLAR ====================
 
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
@@ -109,7 +78,6 @@ async def start_command(client, message):
     args = message.command
     await get_user(user_id)
     
-    # Referans İşlemi
     if len(args) > 1:
         try:
             referrer_id = int(args[1])
@@ -121,21 +89,12 @@ async def start_command(client, message):
         except: pass
 
     user_data = await get_user(user_id)
-    
-    # MENÜ (Eksiksiz)
     btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💎 Hesabım & Referans", callback_data="my_account")],
-        [InlineKeyboardButton("🚀 VIP Satın Al", url=f"https://t.me/{username if username else 'yasin33'}")],
-        [InlineKeyboardButton("❓ Nasıl Kullanılır?", callback_data="help")]
+        [InlineKeyboardButton("💎 Hesabım", callback_data="my_account")],
+        [InlineKeyboardButton("🚀 VIP Al", url=f"https://t.me/{username if username else 'yasin33'}")],
+        [InlineKeyboardButton("❓ Yardım", callback_data="help")]
     ])
-    
-    await message.reply(
-        f"👋 **Selam {message.from_user.first_name}!**\n\n"
-        f"Ben **Yael Saver**. Kısıtlı içerikleri orijinal kalitede indiririm.\n\n"
-        f"💰 **Mevcut Hakkın:** `{user_data['balance']}` Dosya\n\n"
-        f"👇 Link gönder veya arkadaş davet et kazan!",
-        reply_markup=btn
-    )
+    await message.reply(f"👋 **Selam {message.from_user.first_name}!**\n💰 **Hakkın:** `{user_data['balance']}`", reply_markup=btn)
 
 @bot.on_callback_query()
 async def callback_handler(client, callback):
@@ -145,24 +104,9 @@ async def callback_handler(client, callback):
 
     if data == "my_account":
         ref_link = f"https://t.me/{client.me.username}?start={user_id}"
-        await callback.message.edit(
-            f"👤 **HESAP BİLGİLERİ**\n\n"
-            f"💰 **Bakiye:** `{user_data['balance']}`\n"
-            f"👥 **Davetler:** `{user_data['total_refs']}`\n\n"
-            f"🔗 **Referans Linkin:**\n`{ref_link}`",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]])
-        )
-
+        await callback.message.edit(f"💰 **Bakiye:** `{user_data['balance']}`\n🔗 **Link:**\n`{ref_link}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
     elif data == "help":
-        await callback.message.edit(
-            "❓ **NASIL KULLANILIR?**\n\n"
-            "1️⃣ Yasaklı kanaldan linki kopyala.\n"
-            "2️⃣ Buraya yapıştır.\n"
-            "3️⃣ Bot indirip sana atsın.\n\n"
-            "💎 **VIP:** Sınırsız indirme için yöneticiye yaz.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]])
-        )
-
+        await callback.message.edit("Linki yapıştır, gerisini bana bırak.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
     elif data == "back_home":
         await start_command(client, callback.message)
 
@@ -171,19 +115,16 @@ async def process_link(client, message):
     user_id = message.from_user.id
     user_data = await get_user(user_id)
 
-    # 1. Bakiye Kontrolü
-    if user_data["balance"] <= 0 and user_id != OWNER_ID: # Owner'a sınır yok
-        return await message.reply(
-            "⛔ **Hakkınız Bitti!**\nVIP alın veya arkadaş davet edin.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🚀 VIP Al", url=f"https://t.me/yasin33")]
-            ])
-        )
+    if user_data["balance"] <= 0 and user_id != OWNER_ID:
+        return await message.reply("⛔ **Hakkınız Bitti!**")
 
     status_msg = await message.reply("⏳ **İşleniyor...**")
     
     try:
-        # Link Ayrıştırma
+        # Link Çözümleme
+        chat_id = None
+        msg_id = None
+        
         if "t.me/c/" in message.text:
             parts = message.text.split("t.me/c/")[1].split("/")
             chat_id = int("-100" + parts[0])
@@ -193,70 +134,63 @@ async def process_link(client, message):
             chat_id = parts[0]
             msg_id = int(parts[1].split("?")[0])
 
-        target_msg = await userbot.get_messages(chat_id, msg_id)
+        # 🔥 KRİTİK NOKTA: KANAL KONTROLÜ
+        # Önce mesajı getirmeye çalış, hata verirse yakala
+        try:
+            target_msg = await userbot.get_messages(chat_id, msg_id)
+        except (PeerIdInvalid, ChannelInvalid, ChannelPrivate):
+            await status_msg.edit(
+                f"❌ **ERİŞİM HATASI!**\n\n"
+                f"Userbot bu kanalı tanımıyor (`{chat_id}`).\n"
+                f"Lütfen Userbot hesabınızla bu kanala katılın veya mesaj geçmişini güncelleyin."
+            )
+            return
+        except Exception as e:
+            await status_msg.edit(f"❌ Mesaj alınamadı: {e}")
+            return
         
         if not target_msg or not (target_msg.video or target_msg.photo or target_msg.document):
-            return await status_msg.edit("❌ İçerik bulunamadı veya sadece yazı.")
+            return await status_msg.edit("❌ İçerik bulunamadı.")
 
-        # İndirme
         file_path = await userbot.download_media(target_msg)
         
-        # Gönderme
-        caption = "✅ **Yael Saver** | @yasin33" # Buraya kendi reklamını yaz
-        
         if target_msg.video:
-            await client.send_video(user_id, video=file_path, caption=caption, 
-                                  duration=target_msg.video.duration, 
-                                  width=target_msg.video.width, 
-                                  height=target_msg.video.height)
+            await client.send_video(user_id, video=file_path, caption="✅ Yael Saver", duration=target_msg.video.duration, width=target_msg.video.width, height=target_msg.video.height)
         elif target_msg.photo:
-            await client.send_photo(user_id, photo=file_path, caption=caption)
+            await client.send_photo(user_id, photo=file_path, caption="✅ Yael Saver")
         elif target_msg.document:
-            await client.send_document(user_id, document=file_path, caption=caption)
+            await client.send_document(user_id, document=file_path, caption="✅ Yael Saver")
 
-        # Bakiye Düş (Owner hariç)
         if user_id != OWNER_ID:
             await update_balance(user_id, -1)
             
-        # Temizlik
         if os.path.exists(file_path): os.remove(file_path)
         await status_msg.delete()
 
     except Exception as e:
-        await status_msg.edit(f"❌ Hata: {e}")
+        # Genel Hata Yakalayıcı (Bot Çökmez, Hata Yazar)
+        error_text = str(e)
+        if "Peer id invalid" in error_text:
+            await status_msg.edit("❌ **Hata:** Userbot kanalı bulamıyor. Kanala katıldığından emin ol.")
+        else:
+            await status_msg.edit(f"❌ **Bilinmeyen Hata:** {e}")
+            
         if 'file_path' in locals() and os.path.exists(file_path): os.remove(file_path)
 
-# ==================== 🔥 BAŞLATMA SİSTEMİ (DÜZELTİLDİ) ====================
+# ==================== 🔥 BAŞLATMA ====================
 async def main():
-    print("🤖 Botlar Başlatılıyor...")
-    
-    # Botları başlat
-    try:
-        await bot.start()
-        print(f"✅ SALES BOT AKTİF: @{bot.me.username}")
-    except Exception as e:
-        print(f"❌ BOT TOKEN HATASI: {e}")
-
-    try:
-        await userbot.start()
-        print("✅ USERBOT AKTİF")
-    except Exception as e:
-        print(f"❌ USERBOT HATASI: {e}")
-
-    # Sonsuza kadar bekle
+    print("🤖 Başlatılıyor...")
+    try: await bot.start()
+    except: pass
+    try: await userbot.start()
+    except: pass
     await idle()
-    
-    # Kapanış
     await bot.stop()
     await userbot.stop()
 
 if __name__ == '__main__':
-    # 1. Önce Web Sunucusunu AYRI bir thread'de başlat (Botu bekletmesin)
-    print("🌍 Web Sunucusu Başlatılıyor...")
     web_thread = Thread(target=run_web)
-    web_thread.daemon = True # Ana program kapanınca bu da kapansın
+    web_thread.daemon = True
     web_thread.start()
-
-    # 2. Sonra Botu Ana Döngüde Başlat
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
