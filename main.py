@@ -19,28 +19,26 @@ OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) 
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 
-# GÖRSEL (GitHub Raw Linkin)
+# GÖRSEL
 BOT_IMAGE = "https://github.com/YaelSoft/uyecekmebot/raw/a946c9c8f33435a5f6ff9ee65bcfd353f5156d9b/logo.jpeg"
 
-# 💰 FİYATLANDIRMA STRATEJİSİ
+# 💰 FİYATLANDIRMA
 PRICE_15_TL = "300 TL"
 PRICE_15_STARS = "600 ⭐"
-PRICE_30_TL = "500 TL"   # Fırsat Ürünü
+PRICE_30_TL = "500 TL"
 PRICE_30_STARS = "1000 ⭐"
 
 # SİSTEM
 DB_FILE = "users_backup.json" 
-BACKUP_INTERVAL = 3600  # 1 Saat
-START_BALANCE = 3
-REF_REWARD = 2
+BACKUP_INTERVAL = 3600 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelBusiness")
+logger = logging.getLogger("YaelFix")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Business V9.0 Active 🟢"
+def home(): return "Yael Saver V9.1 Active 🟢"
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -72,37 +70,27 @@ async def save_now(reason="Otomatik"):
             is_dirty = False
         except: pass
 
-# ==================== ⏳ SÜRE & EXPIRE KONTROL GÖREVİ ====================
+# 🔥 İŞTE EKSİK OLAN FONKSİYON BUYDU 🔥
+async def backup_task():
+    while True:
+        await asyncio.sleep(BACKUP_INTERVAL)
+        if is_dirty: await save_now(reason="Saatlik")
+
+# ==================== ⏳ EXPIRE KONTROL ====================
 async def check_expirations_task():
-    """Her saat başı süresi bitenleri kontrol eder ve bildirir"""
     while True:
         try:
             now = time.time()
             for uid, data in db_cache.items():
                 vip_until = data.get("vip_until", 0)
-                # Eğer VIP ise VE süresi dolmuşsa VE henüz 'expired' işaretlenmemişse
                 if vip_until > 0 and now > vip_until:
-                    # Süreyi sıfırla (Free'ye düşür)
                     data["vip_until"] = 0
                     global is_dirty
                     is_dirty = True
-                    
-                    # Kullanıcıya Bildir
                     try:
-                        await bot.send_message(
-                            int(uid),
-                            "⏳ **VIP SÜRENİZ DOLDU!**\n\n"
-                            "Paketinizin süresi sona erdi ve standart üyeliğe geçtiniz.\n"
-                            "Sınırsız indirmeye devam etmek için **VIP AL** menüsünü kullanabilirsiniz."
-                        )
+                        await bot.send_message(int(uid), "⏳ **VIP SÜRENİZ DOLDU!**\nStandart üyeliğe geçtiniz.")
                     except: pass
-            
-            # Veritabanını kaydet
-            if is_dirty: await save_now(reason="Expire Check")
-            
-        except Exception as e:
-            print(f"Expire Check Error: {e}")
-        
+        except: pass
         await asyncio.sleep(BACKUP_INTERVAL)
 
 async def reload_userbot_cache():
@@ -115,33 +103,23 @@ def get_user(user_id):
     global is_dirty
     uid = str(user_id)
     if uid not in db_cache:
-        # vip_until: Unix timestamp (0 ise VIP değil)
         db_cache[uid] = {"balance": START_BALANCE, "invited_by": None, "vip_until": 0}
         is_dirty = True
     return db_cache[uid]
 
 def is_user_vip(user_id):
-    """Kullanıcının süresi var mı kontrol eder"""
     u = get_user(user_id)
-    if u.get("vip_until", 0) > time.time():
-        return True
+    if u.get("vip_until", 0) > time.time(): return True
     return False
 
 def add_vip_days(user_id, days):
-    """Kullanıcıya gün ekler"""
     global is_dirty
     uid = str(user_id)
     if uid not in db_cache: get_user(uid)
-    
     current_expiry = db_cache[uid].get("vip_until", 0)
     now = time.time()
-    
-    # Eğer zaten VIP ise sürenin üstüne ekle, değilse şimdiden başlat
-    if current_expiry > now:
-        new_expiry = current_expiry + (days * 86400)
-    else:
-        new_expiry = now + (days * 86400)
-        
+    if current_expiry > now: new_expiry = current_expiry + (days * 86400)
+    else: new_expiry = now + (days * 86400)
     db_cache[uid]["vip_until"] = new_expiry
     is_dirty = True
     return new_expiry
@@ -175,57 +153,29 @@ async def smart_edit(message, text, reply_markup=None):
             await message.edit_text(text=text, reply_markup=reply_markup, disable_web_page_preview=True)
     except: pass
 
-# ==================== 👑 YÖNETİCİ PANELİ (GÜNCELLENDİ) ====================
+# ==================== 👑 YÖNETİCİ PANELİ ====================
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
 async def admin_panel(client, message):
     total = len(db_cache)
-    # Aktif VIP sayısını süreye göre hesapla
     active_vips = sum(1 for u in db_cache.values() if u.get("vip_until", 0) > time.time())
-    
-    save_status = "⚠️ Kayıt Bekliyor" if is_dirty else "✅ Veriler Güvende"
+    status = "⚠️ Kayıt Bekliyor" if is_dirty else "✅ Güncel"
     text = (
-        f"👑 **PATRON PANELİ**\n\n"
-        f"👥 Toplam Üye: `{total}`\n"
-        f"🌟 Aktif Aboneler: `{active_vips}`\n"
-        f"💾 Durum: {save_status}\n\n"
-        f"__Yeni Komutlar:__\n"
-        f"⚙️ `/addvip ID GÜN` (Örn: `/addvip 123 30`)\n"
-        f"⚙️ `/delvip ID` (Süresini bitirir)\n"
-        f"⚙️ `/add ID MİKTAR` (Bakiye ekle)\n"
-        f"⚙️ `/duyuru MESAJ`"
+        f"👑 **PATRON PANELİ**\n\n👥 Üye: `{total}`\n🌟 VIP: `{active_vips}`\n💾 Durum: {status}\n\n"
+        f"⚙️ `/addvip ID GÜN`\n⚙️ `/delvip ID`\n⚙️ `/add ID MİKTAR`\n⚙️ `/duyuru MESAJ`"
     )
     await message.reply(text)
 
 @bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
 async def add_vip_cmd(client, message):
     try:
-        # Komut: /addvip 123456 30
         uid = message.command[1]
         days = int(message.command[2])
-        
-        # Gün Ekle
         new_expiry = add_vip_days(uid, days)
-        
-        # Tarihi Formatla
         date_str = datetime.datetime.fromtimestamp(new_expiry).strftime('%d.%m.%Y')
-        
-        # Admin'e Cevap
-        await message.reply(f"✅ `{uid}` kullanıcısına **{days} Gün** eklendi.\n📅 Bitiş: {date_str}")
-        
-        # Kullanıcıya Müjde Mesajı
-        try:
-            await client.send_message(
-                int(uid),
-                f"🎉 **TEBRİKLER!**\n\n"
-                f"Hesabınıza **{days} GÜNLÜK PRO PAKET** tanımlandı.\n"
-                f"Artık sınırsız ve reklamsız indirme yapabilirsiniz.\n\n"
-                f"📅 **Son Kullanma:** {date_str}\n"
-                f"🚀 İyi kullanımlar dileriz!"
-            )
+        await message.reply(f"✅ `{uid}` -> {days} Gün eklendi.\nBitiş: {date_str}")
+        try: await client.send_message(int(uid), f"🎉 **TEBRİKLER!**\n\n{days} Günlük PRO PAKET tanımlandı.\n📅 Bitiş: {date_str}")
         except: pass
-        
-    except:
-        await message.reply("❌ Hatalı Komut!\nDoğrusu: `/addvip KULLANICI_ID GÜN_SAYISI`\nÖrnek: `/addvip 12345678 30`")
+    except: await message.reply("❌ Hata: `/addvip ID GÜN`")
 
 @bot.on_message(filters.command("delvip") & filters.user(OWNER_ID))
 async def del_vip_cmd(client, message):
@@ -235,7 +185,7 @@ async def del_vip_cmd(client, message):
             db_cache[uid]["vip_until"] = 0
             global is_dirty
             is_dirty = True
-            await message.reply(f"❌ `{uid}` kullanıcısının VIP süresi sıfırlandı.")
+            await message.reply(f"❌ `{uid}` VIP iptal edildi.")
     except: pass
 
 @bot.on_message(filters.command("add") & filters.user(OWNER_ID))
@@ -261,8 +211,7 @@ async def broadcast_cmd(client, message):
         except: pass
     await msg.edit(f"✅ **{c} Kişiye ulaştı.**")
 
-# ==================== 🚀 KULLANICI ARAYÜZÜ (V9.0) ====================
-
+# ==================== 🚀 ARAYÜZ ====================
 def get_main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📥 Link Gönder (İndir)", callback_data="manual_dl")],
@@ -277,7 +226,6 @@ async def start_command(client, message):
         user_id = message.from_user.id
         first_name = message.from_user.first_name
         get_user(user_id) 
-
         if len(message.command) > 1:
             try:
                 ref_id = message.command[1]
@@ -285,20 +233,11 @@ async def start_command(client, message):
                     try: await client.send_message(int(ref_id), f"🔥 **Yeni Referans!**\nArkadaşın katıldı, +{REF_REWARD} Hak kazandın!")
                     except: pass
             except: pass
-
         try:
-            await message.reply_photo(
-                photo=BOT_IMAGE,
-                caption=f"👋 **Hoş Geldin, {first_name}!**\n\n🤖 **Yael Saver** sistemine bağlandın.\nGizli gruplardan içerik indiren tek botsun.\n\n👇 **Menüden işlem seç:**",
-                reply_markup=get_main_menu()
-            )
+            await message.reply_photo(photo=BOT_IMAGE, caption=f"👋 **Hoş Geldin, {first_name}!**\n\n🤖 **Yael Saver** sistemine bağlandın.\nGizli gruplardan içerik indiren tek botsun.\n\n👇 **Menüden işlem seç:**", reply_markup=get_main_menu())
         except:
-            await message.reply(
-                f"👋 **Hoş Geldin, {first_name}!**\n\n🤖 **Yael Saver** sistemine bağlandın.\nGizli gruplardan içerik indiren tek bot.\n\n👇 **Menüden işlem seç:**",
-                reply_markup=get_main_menu()
-            )
-    except Exception as e:
-        print(f"Start Hatası: {e}")
+            await message.reply(f"👋 **Hoş Geldin, {first_name}!**\n\n🤖 **Yael Saver** sistemine bağlandın.\nGizli gruplardan içerik indiren tek bot.\n\n👇 **Menüden işlem seç:**", reply_markup=get_main_menu())
+    except Exception as e: print(f"Start Hatası: {e}")
 
 @bot.on_callback_query()
 async def cb_handler(client, callback):
@@ -309,21 +248,16 @@ async def cb_handler(client, callback):
 
     if data == "back_home":
         await callback.message.delete()
-        try:
-            await client.send_photo(user_id, photo=BOT_IMAGE, caption="👋 **Ana Menüdesin.**\n👇 İşlem seç:", reply_markup=get_main_menu())
-        except:
-            await client.send_message(user_id, "👋 **Ana Menüdesin.**\n👇 İşlem seç:", reply_markup=get_main_menu())
+        try: await client.send_photo(user_id, photo=BOT_IMAGE, caption="👋 **Ana Menüdesin.**\n👇 İşlem seç:", reply_markup=get_main_menu())
+        except: await client.send_message(user_id, "👋 **Ana Menüdesin.**\n👇 İşlem seç:", reply_markup=get_main_menu())
         return
     
     elif data == "my_account":
         vip_status = is_user_vip(user_id)
-        
         if vip_status:
             expiry = u.get("vip_until", 0)
-            # Kalan gün hesabı
             days_left = int((expiry - time.time()) / 86400)
             date_str = datetime.datetime.fromtimestamp(expiry).strftime('%d.%m.%Y')
-            
             status_text = "🥇 **PRO PAKET**"
             time_text = f"{date_str} ({days_left} Gün kaldı)"
             bal_text = "♾️ Sınırsız"
@@ -332,61 +266,24 @@ async def cb_handler(client, callback):
             time_text = "-"
             bal_text = f"{u['balance']} Dosya"
         
-        text = (
-            f"👤 **HESAP DURUMU**\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"🆔 **ID:** `{user_id}`\n"
-            f"🏷️ **İsim:** {callback.from_user.first_name}\n\n"
-            f"🛡 **Paket:** {status_text}\n"
-            f"📅 **Bitiş:** {time_text}\n"
-            f"💰 **Bakiye:** `{bal_text}`"
-        )
+        text = f"👤 **HESAP DURUMU**\n━━━━━━━━━━━━━━━\n🆔 **ID:** `{user_id}`\n🏷️ **İsim:** {callback.from_user.first_name}\n\n🛡 **Paket:** {status_text}\n📅 **Bitiş:** {time_text}\n💰 **Bakiye:** `{bal_text}`"
         await smart_edit(callback.message, text, back_btn)
 
     elif data == "invite_friend":
         link = f"https://t.me/{client.me.username}?start={user_id}"
         share_text = f"🔥 **Telegram'ın en iyi gizli içerik indirme botu!**\n\nÜcretsiz deneme hakkı veriyor. Kaliteyi bozmadan indiriyor.\n\n👇 Hemen dene:\n{link}"
         url = f"https://t.me/share/url?url={share_text}"
-        
-        text = (
-            f"🎁 **BEDAVA HAK KAZANMA MERKEZİ**\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Arkadaşlarını davet et, **+{REF_REWARD} İndirme Hakkı** kazan!\n\n"
-            f"🔗 **Özel Linkin:**\n`{link}`\n\n"
-            f"👇 **Tek Tıkla Paylaş:**"
-        )
-        btns = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 Arkadaşlarına Gönder", url=url)],
-            [InlineKeyboardButton("🔙 Geri Dön", callback_data="back_home")]
-        ])
+        text = f"🎁 **BEDAVA HAK KAZANMA MERKEZİ**\n━━━━━━━━━━━━━━━━━━━━━━━━\nArkadaşlarını davet et, **+{REF_REWARD} İndirme Hakkı** kazan!\n\n🔗 **Özel Linkin:**\n`{link}`\n\n👇 **Tek Tıkla Paylaş:**"
+        btns = InlineKeyboardMarkup([[InlineKeyboardButton("📤 Arkadaşlarına Gönder", url=url)], [InlineKeyboardButton("🔙 Geri Dön", callback_data="back_home")]])
         await smart_edit(callback.message, text, btns)
 
     elif data == "manual_dl":
-        text = (
-            f"📥 **İÇERİK İNDİRME**\n\n"
-            f"1️⃣ Linki kopyala.\n"
-            f"2️⃣ Buraya yapıştır.\n\n"
-            f"🛑 **Uyarı:** Eğer bot 'Erişim Yok' derse, önce o grubun **Davet Linkini** at."
-        )
+        text = f"📥 **İÇERİK İNDİRME**\n\n1️⃣ Linki kopyala.\n2️⃣ Buraya yapıştır.\n\n🛑 **Uyarı:** Eğer bot 'Erişim Yok' derse, önce o grubun **Davet Linkini** at."
         await smart_edit(callback.message, text, back_btn)
 
     elif data == "buy_vip":
-        text = (
-            f"💎 **ABONELİK PAKETLERİ**\n"
-            f"━━━━━━━━━━━━━━━\n\n"
-            f"🥈 **STARTER (15 Gün)**\n"
-            f"├ 💰 {PRICE_15_TL} / {PRICE_15_STARS}\n"
-            f"└ ⏳ Kısa süreli kullanım için ideal.\n\n"
-            f"🥇 **PRO PAKET (30 Gün) 🔥**\n"
-            f"├ 💰 {PRICE_30_TL} / {PRICE_30_STARS}\n"
-            f"└ 🚀 **En Çok Tercih Edilen!**\n\n"
-            f"👇 **Satın Almak İçin İletişime Geç:**"
-        )
-        btns = InlineKeyboardMarkup([
-            [InlineKeyboardButton(f"⭐ Telegram Yıldız ile Al", url=f"https://t.me/{OWNER_USERNAME}")],
-            [InlineKeyboardButton(f"💳 IBAN / Kripto ile Al", url=f"https://t.me/{OWNER_USERNAME}")],
-            [InlineKeyboardButton("🔙 İptal", callback_data="back_home")]
-        ])
+        text = f"💎 **ABONELİK PAKETLERİ**\n━━━━━━━━━━━━━━━\n\n🥈 **STARTER (15 Gün)**\n├ 💰 {PRICE_15_TL} / {PRICE_15_STARS}\n└ ⏳ Kısa süreli kullanım için ideal.\n\n🥇 **PRO PAKET (30 Gün) 🔥**\n├ 💰 {PRICE_30_TL} / {PRICE_30_STARS}\n└ 🚀 **En Çok Tercih Edilen!**\n\n👇 **Satın Almak İçin İletişime Geç:**"
+        btns = InlineKeyboardMarkup([[InlineKeyboardButton(f"⭐ Telegram Yıldız ile Al", url=f"https://t.me/{OWNER_USERNAME}"),],[InlineKeyboardButton(f"💳 IBAN / Kripto ile Al", url=f"https://t.me/{OWNER_USERNAME}")],[InlineKeyboardButton("🔙 İptal", callback_data="back_home")]])
         await smart_edit(callback.message, text, btns)
 
     elif data == "how_to":
@@ -417,20 +314,10 @@ async def process_link(client, message):
     u = get_user(user_id)
     vip_status = is_user_vip(user_id)
 
-    # 1. Bakiye Kontrolü (VIP Değilse ve Bakiye Yoksa)
     if not vip_status and u["balance"] <= 0 and user_id != OWNER_ID:
-        return await message.reply(
-            f"⛔ **HAKKIN BİTTİ!**\n\n"
-            f"Deneme süren sona erdi.\n"
-            f"Devam etmek için birini seç:",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("👥 Arkadaş Davet Et (+2 Hak)", callback_data="invite_friend")],
-                [InlineKeyboardButton("💎 Abonelik Satın Al", callback_data="buy_vip")]
-            ])
-        )
+        return await message.reply(f"⛔ **HAKKIN BİTTİ!**\n\nBakiyen sıfırlandı. Devam etmek için:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Abonelik Satın Al", callback_data="buy_vip")]]))
 
     status = await message.reply("⏳ **İşleniyor...**")
-    
     try:
         link = message.text
         if "t.me/c/" in link:
@@ -456,28 +343,15 @@ async def process_link(client, message):
             return await status.edit("❌ İçerik yok.")
 
         path = await userbot.download_media(target_msg)
-        
-        # 🔥 TEMİZ CAPTION
         caption_on_media = "" if vip_status or user_id == OWNER_ID else "✅ **@YaelSaverBot ile indirildi.**"
 
-        if target_msg.video:
-            await client.send_video(user_id, path, caption=caption_on_media, duration=target_msg.video.duration, width=target_msg.video.width, height=target_msg.video.height)
-        elif target_msg.photo:
-            await client.send_photo(user_id, path, caption=caption_on_media)
-        elif target_msg.document:
-            await client.send_document(user_id, path, caption=caption_on_media)
+        if target_msg.video: await client.send_video(user_id, path, caption=caption_on_media, duration=target_msg.video.duration, width=target_msg.video.width, height=target_msg.video.height)
+        elif target_msg.photo: await client.send_photo(user_id, path, caption=caption_on_media)
+        elif target_msg.document: await client.send_document(user_id, path, caption=caption_on_media)
 
-        # 🔥 HAK DÜŞÜMÜ & BİLDİRİM (SADECE FREE İÇİN)
         if not vip_status and user_id != OWNER_ID:
             update_balance(user_id, -1)
-            new_balance = u['balance']
-            
-            # AYRI MESAJ (Bildirim)
-            await client.send_message(
-                user_id,
-                f"📉 **Kalan Hakkın:** `{new_balance}`\n"
-                f"⚡ _Sınırsız için PRO PAKET al!_"
-            )
+            await client.send_message(user_id, f"📉 **Kalan Hakkın:** `{u['balance']}`\n⚡ _Sınırsız için PRO PAKET al!_")
 
         if os.path.exists(path): os.remove(path)
         await status.delete()
@@ -494,15 +368,11 @@ async def main():
     except: pass
     try: await userbot.start()
     except: pass
-    
     db_cache = await restore_data()
     await reload_userbot_cache()
-    
-    # İki görevi de başlat: Biri yedek alır, biri süreleri kontrol eder
     asyncio.create_task(backup_task())
     asyncio.create_task(check_expirations_task())
-    
-    print("✅ YAEL SAVER V9.0 BUSINESS AKTİF")
+    print("✅ YAEL SAVER V9.1 FIXED AKTİF")
     try: await idle()
     except: pass
     finally:
