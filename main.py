@@ -20,8 +20,7 @@ LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0"))
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 BOT_IMAGE = "https://github.com/YaelSoft/uyecekmebot/raw/a946c9c8f33435a5f6ff9ee65bcfd353f5156d9b/logo.jpeg"
 
-# 🔥🔥🔥 BURAYI KENDİ BOTUNUN ADIYLA DEĞİŞTİR (BAŞINDA @ YOK) 🔥🔥🔥
-# Örnek: FIXED_BOT_USERNAME = "YaelSaverBot"
+# 🔥🔥🔥 BURAYI MUTLAKA DOLDUR (BAŞINDA @ YOK) 🔥🔥🔥
 FIXED_BOT_USERNAME = "YaelSaverBot" 
 
 # 💰 FİYATLAR
@@ -37,14 +36,14 @@ DB_FILE = "users_backup.json"
 BACKUP_INTERVAL = 3600 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV15")
+logger = logging.getLogger("YaelV16")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Yael Saver V15.0 Active 🟢"
+    return "Yael Saver V16.0 Active 🟢"
 
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
@@ -202,14 +201,29 @@ def get_start_caption(first_name):
         f"Aşağıdaki menüden işlem seçerek başlayabilirsin."
     )
 
-async def smart_edit(message, text, reply_markup=None):
+# 🔥 YENİ FONKSİYON: DÜZENLEME YOK, SİL VE GÖNDER VAR 🔥
+async def refresh_menu(client, message, text, reply_markup=None):
     try:
-        if message.photo:
-            await message.edit_caption(caption=text, reply_markup=reply_markup)
-        else:
-            await message.edit_text(text=text, reply_markup=reply_markup, disable_web_page_preview=True)
+        # Eski mesajı sil
+        await message.delete()
     except:
         pass
+    
+    # Yeni mesajı sıfırdan at
+    try:
+        await client.send_photo(
+            chat_id=message.chat.id,
+            photo=BOT_IMAGE,
+            caption=text,
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        # Resim atamazsa yazı atar
+        await client.send_message(
+            chat_id=message.chat.id,
+            text=text,
+            reply_markup=reply_markup
+        )
 
 # ==================== 👑 YÖNETİCİ PANELİ ====================
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
@@ -273,7 +287,7 @@ async def broadcast_cmd(client, message):
             pass
     await msg.edit(f"✅ **{c} Kişiye ulaştı.**")
 
-# ==================== 🚀 ARAYÜZ (V15.0) ====================
+# ==================== 🚀 ARAYÜZ (V16.0) ====================
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
     try:
@@ -301,18 +315,18 @@ async def start_command(client, message):
 
 @bot.on_callback_query()
 async def cb_handler(client, callback):
+    # 🔥 YÜKLENİYOR İKONUNU YOK ETMEK İÇİN KESİN KOMUT
+    try: await callback.answer()
+    except: pass
+    
     data = callback.data
     user_id = callback.from_user.id
     u = get_user(user_id)
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menüye Dön", callback_data="back_home")]])
 
     if data == "back_home":
-        await callback.message.delete()
         caption_text = get_start_caption(callback.from_user.first_name)
-        try:
-            await client.send_photo(user_id, photo=BOT_IMAGE, caption=caption_text, reply_markup=get_main_menu())
-        except:
-            await client.send_message(user_id, text=caption_text, reply_markup=get_main_menu())
+        await refresh_menu(client, callback.message, caption_text, get_main_menu())
         return
     
     elif data == "my_account":
@@ -344,12 +358,9 @@ async def cb_handler(client, callback):
             f"📅 **Abonelik Süresi:**\n╰ {time_text}\n\n"
             f"💰 **İndirme Bakiyesi:**\n╰ `{bal_text}`"
         )
-        await smart_edit(callback.message, text, back_btn)
+        await refresh_menu(client, callback.message, text, back_btn)
 
     elif data == "invite_friend":
-        # 🔥🔥🔥 EN BASİT VE GARANTİ YÖNTEM 🔥🔥🔥
-        # API çağrısı YOK. Gecikme YOK. Direkt metin birleştirme.
-        
         link = f"https://t.me/{FIXED_BOT_USERNAME}?start={user_id}"
         share_text = f"🔥 **Yael Saver ile gizli içerikleri indir!**\n\nÜcretsiz deneme hakkı veriyor.\n\n👇 Hemen dene:\n{link}"
         url = f"https://t.me/share/url?url={share_text}"
@@ -365,7 +376,7 @@ async def cb_handler(client, callback):
             f"👇 **Hemen Paylaş:**"
         )
         btns = InlineKeyboardMarkup([[InlineKeyboardButton("📤 Arkadaşlarına Gönder", url=url)], [InlineKeyboardButton("🔙 Geri Dön", callback_data="back_home")]])
-        await smart_edit(callback.message, text, btns)
+        await refresh_menu(client, callback.message, text, btns)
 
     elif data == "manual_dl":
         text = (
@@ -376,7 +387,7 @@ async def cb_handler(client, callback):
             f"🛑 **Uyarı:**\n"
             f"Eğer bot 'Erişim Yok' hatası verirse, önce o grubun **Davet Linkini** bota atın."
         )
-        await smart_edit(callback.message, text, back_btn)
+        await refresh_menu(client, callback.message, text, back_btn)
 
     elif data == "buy_vip":
         text = (
@@ -399,7 +410,7 @@ async def cb_handler(client, callback):
             [InlineKeyboardButton(f"💳 IBAN / Kripto ile Öde", url=f"https://t.me/{OWNER_USERNAME}")],
             [InlineKeyboardButton("🔙 İptal", callback_data="back_home")]
         ])
-        await smart_edit(callback.message, text, btns)
+        await refresh_menu(client, callback.message, text, btns)
 
     elif data == "how_to":
         text = (
@@ -413,7 +424,7 @@ async def cb_handler(client, callback):
             f"Kendinize özel bot yazdırmak veya toplu işlem yaptırmak için Admin ile görüşün:\n"
             f"👉 @{OWNER_USERNAME}"
         )
-        await smart_edit(callback.message, text, back_btn)
+        await refresh_menu(client, callback.message, text, back_btn)
 
     elif data == "bulk_info":
         text = (
@@ -424,7 +435,7 @@ async def cb_handler(client, callback):
             f"📞 **Admin İle İletişime Geçin:**\n"
             f"👉 @{OWNER_USERNAME}"
         )
-        await smart_edit(callback.message, text, back_btn)
+        await refresh_menu(client, callback.message, text, back_btn)
 
 # ==================== 🔗 İŞLEM MERKEZİ ====================
 @bot.on_message(filters.regex(r"https://t.me/\+") | filters.regex(r"https://t.me/joinchat/"))
@@ -518,7 +529,7 @@ async def main():
     await reload_userbot_cache()
     asyncio.create_task(backup_task())
     asyncio.create_task(check_expirations_task())
-    print("✅ YAEL SAVER V15.0 MANUAL FIXED ACTIVE")
+    print("✅ YAEL SAVER V16.0 DELETE&SEND MODE")
     try:
         await idle()
     except:
