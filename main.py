@@ -7,7 +7,7 @@ import datetime
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import FloodWait, PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserAlreadyParticipant
 
 # ==================== ⚙️ AYARLAR ====================
@@ -20,8 +20,8 @@ LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0"))
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 BOT_IMAGE = "https://github.com/YaelSoft/uyecekmebot/raw/a946c9c8f33435a5f6ff9ee65bcfd353f5156d9b/logo.jpeg"
 
-# 🔥🔥🔥 BURAYI MUTLAKA DOLDUR (BAŞINDA @ YOK) 🔥🔥🔥
-FIXED_BOT_USERNAME = "YaelSaverBot" 
+# 🔥 BURAYI DOLDUR (Başında @ YOK) 🔥
+FIXED_BOT_USERNAME = "YaelSaverBot"
 
 # 💰 FİYATLAR
 PRICE_15_TL = "300 TL"
@@ -36,14 +36,14 @@ DB_FILE = "users_backup.json"
 BACKUP_INTERVAL = 3600 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV16")
+logger = logging.getLogger("YaelV17")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Yael Saver V16.0 Active 🟢"
+    return "Yael Saver V17.0 Active 🟢"
 
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
@@ -141,7 +141,7 @@ def add_vip_days(user_id, days):
     now = time.time()
     
     if days > 9000:
-        new_expiry = now + (36500 * 86400) # Sınırsız
+        new_expiry = now + (36500 * 86400) 
     elif current_expiry > now:
         new_expiry = current_expiry + (days * 86400)
     else:
@@ -201,29 +201,20 @@ def get_start_caption(first_name):
         f"Aşağıdaki menüden işlem seçerek başlayabilirsin."
     )
 
-# 🔥 YENİ FONKSİYON: DÜZENLEME YOK, SİL VE GÖNDER VAR 🔥
-async def refresh_menu(client, message, text, reply_markup=None):
+async def safe_edit(message, text, reply_markup=None):
+    """En güvenli düzenleme fonksiyonu - Hata verirse loglar"""
     try:
-        # Eski mesajı sil
-        await message.delete()
-    except:
-        pass
-    
-    # Yeni mesajı sıfırdan at
-    try:
-        await client.send_photo(
-            chat_id=message.chat.id,
-            photo=BOT_IMAGE,
-            caption=text,
-            reply_markup=reply_markup
-        )
+        if message.photo:
+            await message.edit_caption(caption=text, reply_markup=reply_markup)
+        else:
+            await message.edit_text(text=text, reply_markup=reply_markup, disable_web_page_preview=True)
     except Exception as e:
-        # Resim atamazsa yazı atar
-        await client.send_message(
-            chat_id=message.chat.id,
-            text=text,
-            reply_markup=reply_markup
-        )
+        print(f"Edit Hatası: {e}")
+        # Düzenleyemezse yeni mesaj atar (Son çare)
+        try:
+            await message.reply(text=text, reply_markup=reply_markup)
+        except:
+            pass
 
 # ==================== 👑 YÖNETİCİ PANELİ ====================
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
@@ -287,7 +278,7 @@ async def broadcast_cmd(client, message):
             pass
     await msg.edit(f"✅ **{c} Kişiye ulaştı.**")
 
-# ==================== 🚀 ARAYÜZ (V16.0) ====================
+# ==================== 🚀 ARAYÜZ (V17.0) ====================
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
     try:
@@ -315,7 +306,7 @@ async def start_command(client, message):
 
 @bot.on_callback_query()
 async def cb_handler(client, callback):
-    # 🔥 YÜKLENİYOR İKONUNU YOK ETMEK İÇİN KESİN KOMUT
+    # 🔥 DÖNMEYİ DURDURAN SİHİRLİ SATIR BURASI 🔥
     try: await callback.answer()
     except: pass
     
@@ -326,7 +317,7 @@ async def cb_handler(client, callback):
 
     if data == "back_home":
         caption_text = get_start_caption(callback.from_user.first_name)
-        await refresh_menu(client, callback.message, caption_text, get_main_menu())
+        await safe_edit(callback.message, caption_text, get_main_menu())
         return
     
     elif data == "my_account":
@@ -358,7 +349,7 @@ async def cb_handler(client, callback):
             f"📅 **Abonelik Süresi:**\n╰ {time_text}\n\n"
             f"💰 **İndirme Bakiyesi:**\n╰ `{bal_text}`"
         )
-        await refresh_menu(client, callback.message, text, back_btn)
+        await safe_edit(callback.message, text, back_btn)
 
     elif data == "invite_friend":
         link = f"https://t.me/{FIXED_BOT_USERNAME}?start={user_id}"
@@ -376,7 +367,7 @@ async def cb_handler(client, callback):
             f"👇 **Hemen Paylaş:**"
         )
         btns = InlineKeyboardMarkup([[InlineKeyboardButton("📤 Arkadaşlarına Gönder", url=url)], [InlineKeyboardButton("🔙 Geri Dön", callback_data="back_home")]])
-        await refresh_menu(client, callback.message, text, btns)
+        await safe_edit(callback.message, text, btns)
 
     elif data == "manual_dl":
         text = (
@@ -387,7 +378,7 @@ async def cb_handler(client, callback):
             f"🛑 **Uyarı:**\n"
             f"Eğer bot 'Erişim Yok' hatası verirse, önce o grubun **Davet Linkini** bota atın."
         )
-        await refresh_menu(client, callback.message, text, back_btn)
+        await safe_edit(callback.message, text, back_btn)
 
     elif data == "buy_vip":
         text = (
@@ -410,7 +401,7 @@ async def cb_handler(client, callback):
             [InlineKeyboardButton(f"💳 IBAN / Kripto ile Öde", url=f"https://t.me/{OWNER_USERNAME}")],
             [InlineKeyboardButton("🔙 İptal", callback_data="back_home")]
         ])
-        await refresh_menu(client, callback.message, text, btns)
+        await safe_edit(callback.message, text, btns)
 
     elif data == "how_to":
         text = (
@@ -424,7 +415,7 @@ async def cb_handler(client, callback):
             f"Kendinize özel bot yazdırmak veya toplu işlem yaptırmak için Admin ile görüşün:\n"
             f"👉 @{OWNER_USERNAME}"
         )
-        await refresh_menu(client, callback.message, text, back_btn)
+        await safe_edit(callback.message, text, back_btn)
 
     elif data == "bulk_info":
         text = (
@@ -435,7 +426,7 @@ async def cb_handler(client, callback):
             f"📞 **Admin İle İletişime Geçin:**\n"
             f"👉 @{OWNER_USERNAME}"
         )
-        await refresh_menu(client, callback.message, text, back_btn)
+        await safe_edit(callback.message, text, back_btn)
 
 # ==================== 🔗 İŞLEM MERKEZİ ====================
 @bot.on_message(filters.regex(r"https://t.me/\+") | filters.regex(r"https://t.me/joinchat/"))
@@ -529,7 +520,7 @@ async def main():
     await reload_userbot_cache()
     asyncio.create_task(backup_task())
     asyncio.create_task(check_expirations_task())
-    print("✅ YAEL SAVER V16.0 DELETE&SEND MODE")
+    print("✅ YAEL SAVER V17.0 FINAL ACTIVE")
     try:
         await idle()
     except:
