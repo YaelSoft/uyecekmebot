@@ -31,16 +31,17 @@ PRICE_LIFE_STARS = "2000 ⭐"
 # SİSTEM
 DB_FILE = "users_backup.json" 
 BACKUP_INTERVAL = 3600 
+BOT_USERNAME = "YaelSaverBot" # Varsayılan, açılışta güncellenecek
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV12.5")
+logger = logging.getLogger("YaelV13")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Yael Saver V12.5 Active 🟢"
+    return "Yael Saver V13.0 Active 🟢"
 
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
@@ -107,7 +108,6 @@ async def check_expirations_task():
             pass
         await asyncio.sleep(BACKUP_INTERVAL)
 
-# 🔥 İŞTE O HATALI YER: ARTIK ALT ALTA VE TEMİZ 🔥
 async def reload_userbot_cache():
     try:
         async for dialog in userbot.get_dialogs():
@@ -270,7 +270,7 @@ async def broadcast_cmd(client, message):
             pass
     await msg.edit(f"✅ **{c} Kişiye ulaştı.**")
 
-# ==================== 🚀 ARAYÜZ (V12.5) ====================
+# ==================== 🚀 ARAYÜZ (V13.0) ====================
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
     try:
@@ -344,14 +344,11 @@ async def cb_handler(client, callback):
         await smart_edit(callback.message, text, back_btn)
 
     elif data == "invite_friend":
-        # REFERANS FIX
-        try:
-            me = await client.get_me()
-            bot_username = me.username
-        except:
-            bot_username = "YaelSaverBot"
-            
-        link = f"https://t.me/{bot_username}?start={user_id}"
+        # 🔥🔥🔥 ARTIK SORGULAMA YOK, DİREKT GLOBAL DEĞİŞKEN 🔥🔥🔥
+        # Bot adını açılışta bir kez öğrendik, şimdi sadece kullanıyoruz.
+        # Bu işlem 0.001 saniye sürer. Donma ŞANSI YOK.
+        
+        link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
         share_text = f"🔥 **Yael Saver ile gizli içerikleri indir!**\n\nÜcretsiz deneme hakkı veriyor.\n\n👇 Hemen dene:\n{link}"
         url = f"https://t.me/share/url?url={share_text}"
         
@@ -505,7 +502,7 @@ async def process_link(client, message):
 
 # ==================== BAŞLATMA ====================
 async def main():
-    global db_cache
+    global db_cache, BOT_USERNAME
     print("🤖 Başlatılıyor...")
     try:
         await bot.start()
@@ -515,11 +512,21 @@ async def main():
         await userbot.start()
     except:
         pass
+
+    # 🔥🔥 BOT KULLANICI ADINI BURADA ALIYORUZ 🔥🔥
+    try:
+        me = await bot.get_me()
+        BOT_USERNAME = me.username
+        print(f"✅ Bot Username Algılandı: @{BOT_USERNAME}")
+    except:
+        BOT_USERNAME = "YaelSaverBot"
+        print("⚠️ Bot Username alınamadı, varsayılan kullanılıyor.")
+
     db_cache = await restore_data()
     await reload_userbot_cache()
     asyncio.create_task(backup_task())
     asyncio.create_task(check_expirations_task())
-    print("✅ YAEL SAVER V12.5 EXPANDED ACTIVE")
+    print("✅ YAEL SAVER V13.0 ACTIVE")
     try:
         await idle()
     except:
