@@ -20,8 +20,8 @@ LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0"))
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 BOT_IMAGE = "https://github.com/YaelSoft/uyecekmebot/raw/a946c9c8f33435a5f6ff9ee65bcfd353f5156d9b/logo.jpeg"
 
-# 🔥🔥🔥 BURAYI KENDİ BOTUNUN KULLANICI ADIYLA DEĞİŞTİR 🔥🔥🔥
-# Başında @ işareti OLMASIN. Sadece isim.
+# 🔥🔥🔥 BURAYI KENDİ BOTUNUN ADIYLA DEĞİŞTİR (BAŞINDA @ YOK) 🔥🔥🔥
+# Örnek: FIXED_BOT_USERNAME = "YaelSaverBot"
 FIXED_BOT_USERNAME = "YaelSaverBot" 
 
 # 💰 FİYATLAR
@@ -37,14 +37,14 @@ DB_FILE = "users_backup.json"
 BACKUP_INTERVAL = 3600 
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV14")
+logger = logging.getLogger("YaelV15")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Yael Saver V14.0 Active 🟢"
+    return "Yael Saver V15.0 Active 🟢"
 
 def run_web(): 
     port = int(os.environ.get("PORT", 8080))
@@ -273,7 +273,7 @@ async def broadcast_cmd(client, message):
             pass
     await msg.edit(f"✅ **{c} Kişiye ulaştı.**")
 
-# ==================== 🚀 ARAYÜZ (V14.0 HARDCORE) ====================
+# ==================== 🚀 ARAYÜZ (V15.0) ====================
 @bot.on_message(filters.command("start"))
 async def start_command(client, message):
     try:
@@ -347,8 +347,8 @@ async def cb_handler(client, callback):
         await smart_edit(callback.message, text, back_btn)
 
     elif data == "invite_friend":
-        # 🔥🔥🔥 MANUEL MOD: %100 HIZ, %0 HATA 🔥🔥🔥
-        # Burada FIXED_BOT_USERNAME değişkenini kullanıyoruz.
+        # 🔥🔥🔥 EN BASİT VE GARANTİ YÖNTEM 🔥🔥🔥
+        # API çağrısı YOK. Gecikme YOK. Direkt metin birleştirme.
         
         link = f"https://t.me/{FIXED_BOT_USERNAME}?start={user_id}"
         share_text = f"🔥 **Yael Saver ile gizli içerikleri indir!**\n\nÜcretsiz deneme hakkı veriyor.\n\n👇 Hemen dene:\n{link}"
@@ -518,7 +518,7 @@ async def main():
     await reload_userbot_cache()
     asyncio.create_task(backup_task())
     asyncio.create_task(check_expirations_task())
-    print("✅ YAEL SAVER V14.0 HARDCORE ACTIVE")
+    print("✅ YAEL SAVER V15.0 MANUAL FIXED ACTIVE")
     try:
         await idle()
     except:
