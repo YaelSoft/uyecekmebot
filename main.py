@@ -7,7 +7,7 @@ import datetime
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserAlreadyParticipant, FloodWait
 
 # ==================== ⚙️ AYARLAR ====================
@@ -22,23 +22,29 @@ OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 # 🔥🔥🔥 BOT ADINI YAZ (BAŞINDA @ YOK) 🔥🔥🔥
 FIXED_BOT_USERNAME = "YaelSaverBot"
 
-# 💰 FİYAT & LİMİT STRATEJİSİ
+# 🔗 ÖDEME GRUP LİNKLERİ (ENTEGRE EDİLDİ)
+LINK_BRONZ = "https://t.me/+qTojwM7sPX83YTAx"
+LINK_SILVER = "https://t.me/+QVBAQsKex604YWFh"
+LINK_GOLD = "https://t.me/+TDbG9nHXO2thMjE5"
+LINK_ELITE = "https://t.me/+VRrUf8H8UsBjYjI5"
+
+# 💰 PAKET BİLGİLERİ
 PACKAGES = {
-    "free":   {"name": "ÜCRETSİZ","days": 0,   "limit": 0,   "size_mb": 100, "stars": 0},
-    "bronze": {"name": "BRONZ",   "days": 20,  "limit": 5,   "size_mb": 200, "stars": 100},
-    "silver": {"name": "GÜMÜŞ",   "days": 30,  "limit": 20,  "size_mb": 350, "stars": 350},
-    "gold":   {"name": "ALTIN",   "days": 30,  "limit": 120, "size_mb": 500, "stars": 750},
-    "elite":  {"name": "ELİT",    "days": 365, "limit": 500, "size_mb": 750, "stars": 3300}
+    "free":   {"name": "ÜCRETSİZ","days": 0,   "limit": 0,   "size_mb": 100},
+    "bronze": {"name": "BRONZ",   "days": 20,  "limit": 5,   "size_mb": 200, "link": LINK_BRONZ},
+    "silver": {"name": "GÜMÜŞ",   "days": 30,  "limit": 20,  "size_mb": 350, "link": LINK_SILVER},
+    "gold":   {"name": "ALTIN",   "days": 30,  "limit": 120, "size_mb": 500, "link": LINK_GOLD},
+    "elite":  {"name": "ELİT",    "days": 365, "limit": 500, "size_mb": 750, "link": LINK_ELITE}
 }
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV41")
+logger = logging.getLogger("YaelV44")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V41.0 IMMORTAL MODE Active 🟢"
+def home(): return "Yael Saver V44.0 PRO ACTIVE 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -51,7 +57,6 @@ db_cache = {"users": {}}
 async def restore_data():
     global db_cache
     if LOG_CHANNEL == 0: return
-    print(f"📥 Veriler geri yükleniyor...")
     try:
         async for msg in bot.get_chat_history(LOG_CHANNEL, limit=10):
             if msg.document and msg.document.file_name == DB_FILE:
@@ -88,6 +93,8 @@ def get_user(user_id):
     if uid not in db_cache["users"]:
         db_cache["users"][uid] = {"daily_limit": 0, "daily_usage": 0, "vip_until": 0, "package": "free", "last_reset": today, "invited_by": None, "ref_count": 0}
     user = db_cache["users"][uid]
+    
+    # GÜNLÜK SIFIRLAMA
     if user.get("last_reset") != today:
         user["daily_usage"] = 0
         user["last_reset"] = today
@@ -96,6 +103,8 @@ def get_user(user_id):
             user["package"] = "free"
             try: bot.send_message(int(uid), "⚠️ **Paket Süreniz Doldu!**")
             except: pass
+        
+        # Free ise hakkı sıfırla, VIP ise pakete döndür
         if user["package"] == "free": user["daily_limit"] = 0 
         else:
             pkg_name = user.get("package", "bronze")
@@ -161,10 +170,10 @@ async def worker():
                 if target_msg.video: file_size = target_msg.video.file_size
                 elif target_msg.document: file_size = target_msg.document.file_size
                 elif target_msg.photo: file_size = 1024
+                
                 user_limit_bytes = get_user_size_limit(user_id)
                 if file_size > user_limit_bytes:
-                    await status_msg.edit(f"🛑 **LİMİT AŞIMI!**\nDosya: {file_size/1024/1024:.1f} MB\nLimitiniz: {user_limit_bytes/1024/1024:.0f} MB", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Yükselt", callback_data="shop"), InlineKeyboardButton("🔙 Menü", callback_data="back_home")]])
-                    )
+                    await status_msg.edit(f"🛑 **LİMİT AŞIMI!**\nDosya: {file_size/1024/1024:.1f} MB\nLimitiniz: {user_limit_bytes/1024/1024:.0f} MB", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Yükselt", callback_data="shop"), InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
                     continue
                 await status_msg.edit("⬇️ **İndiriliyor...**")
                 path = await userbot.download_media(target_msg)
@@ -218,6 +227,24 @@ async def start(client, message):
         except: pass
     await menu_switcher(client, message, f"👋 **Merhaba {message.from_user.first_name}!**\n\nTelegram'ın en güçlü botuna hoş geldin.\n👇 İşlem Seç:", main_menu())
 
+# 🔥 MANUEL VIP EKLEME (Senin Kullanacağın Komut)
+@bot.on_message(filters.command("addvip") & filters.user(OWNER_ID))
+async def manual_vip_add(client, message):
+    try:
+        parts = message.command
+        target_id = int(parts[1])
+        pkg_key = parts[2].lower()
+        if pkg_key not in PACKAGES: return await message.reply("❌ Paket bulunamadı (bronze, silver, gold, elite)")
+        
+        add_vip(target_id, pkg_key)
+        await save_backup("Manuel Ekleme")
+        
+        await message.reply(f"✅ Kullanıcı: `{target_id}`\n📦 Paket: **{pkg_key.upper()}** tanımlandı!")
+        try: await client.send_message(target_id, f"🎉 **TEBRİKLER!**\nAdmin tarafından hesabınıza **{PACKAGES[pkg_key]['name']}** paket tanımlandı.")
+        except: pass
+    except:
+        await message.reply("❌ Hata! Kullanım: `/addvip ID PAKET`")
+
 @bot.on_message(filters.command("giftall") & filters.user(OWNER_ID))
 async def gift_all_users(client, message):
     if len(message.command) < 2: return await message.reply("❌ Kullanım: `/giftall 5`")
@@ -255,23 +282,23 @@ async def cb_handler(client, callback):
     data = callback.data
     uid = callback.from_user.id
     u = get_user(uid)
+    
     if data == "back_home": await menu_switcher(client, callback.message, f"👋 **Ana Menü**", main_menu())
     elif data == "howto": await menu_switcher(client, callback.message, "❓ **NASIL KULLANILIR?**\n\n1️⃣ Linki kopyala, bota gönder.\n2️⃣ Bot indirip sana göndersin.\n\n🛑 **Erişim Yok Hatası:**\nGrubun **Davet Linkini** bota atın.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
     elif data == "service": await menu_switcher(client, callback.message, f"👨‍💻 **ADMİN & YAZILIM HİZMETLERİ**\n\n📞 **İletişim:** @{OWNER_USERNAME}", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
+    
     elif data == "shop":
-        txt = "💎 **PREMIUM PAKETLER**\n\nHer gece haklarınız yenilenir.\n\n"
-        pkgs = ["bronze", "silver", "gold", "elite"]
+        txt = "💎 **PREMIUM PAKETLER**\n\nSatın almak için aşağıdaki butonlara tıklayın. Ödeme sonrası Admin onayı ile paketiniz açılır.\n\n"
         btns = []
-        for k in pkgs:
-            v = PACKAGES[k]
-            txt += f"🔸 **{v['name']} ({v['stars']} ⭐)**\n   └ 📅 {v['days']} Gün | 📥 {v['limit']} Hak | 📦 {v['size_mb']} MB\n\n"
-            btns.append([InlineKeyboardButton(f"{v['name']} SATIN AL", callback_data=f"buy_{k}")])
+        for k, v in PACKAGES.items():
+            if k == "free": continue
+            target_url = v.get("link", f"https://t.me/{OWNER_USERNAME}")
+            txt += f"🔸 **{v['name']}**\n   └ 📅 {v['days']} Gün | 📥 {v['limit']} Hak\n\n"
+            btns.append([InlineKeyboardButton(f"{v['name']} AL (Ödeme Ekranı)", url=target_url)])
+            
         btns.append([InlineKeyboardButton("🔙 Geri", callback_data="back_home")])
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup(btns))
-    elif data.startswith("buy_"):
-        pkg = data.split("_")[1]
-        p = PACKAGES[pkg]
-        await client.send_invoice(chat_id=uid, title=f"{p['name']} PAKET", description=f"{p['days']} Gün | {p['limit']} Dosya/Gün", payload=pkg, currency="XTR", prices=[LabeledPrice(label=p['name'], amount=p['stars'])], provider_token="")
+
     elif data == "acc":
         days = int((u["vip_until"] - time.time())/86400) if u["vip_until"] > time.time() else 0
         pkg_name = u.get("package", "free")
@@ -284,36 +311,15 @@ async def cb_handler(client, callback):
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=f"https://t.me/share/url?url={link}"), InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
     elif data == "dl": await menu_switcher(client, callback.message, "📂 **Link gönder, indireyim.**", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
 
-# ✅ ÖDEME HANDLER (ÇÖKMEZ MOD - TRY/EXCEPT)
-async def checkout_handler(c, q): await q.answer(ok=True)
-async def success_handler(c, m):
-    pkg = m.successful_payment.invoice_payload
-    add_vip(m.from_user.id, pkg)
-    await m.reply("🎉 **Ödeme Başarılı!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Menü", callback_data="back_home")]]))
-    try: await c.send_message(OWNER_ID, f"💰 SATIŞ: {pkg} - {m.from_user.id}")
-    except: pass
-    await save_backup("Satış")
-
 # ==================== BAŞLATMA ====================
 async def main():
     print("🤖 Başlatılıyor...")
-    
-    # 🔥 HATA ÖNLEYİCİ BLOK 🔥
-    # Eğer kütüphane eksikse burayı atlar, bot ÇÖKMEZ.
-    try:
-        from pyrogram.handlers import PreCheckoutQueryHandler, MessageHandler
-        bot.add_handler(PreCheckoutQueryHandler(checkout_handler))
-        bot.add_handler(MessageHandler(success_handler, filters.successful_payment))
-        print("✅ Ödeme Modülü Yüklendi")
-    except Exception as e:
-        print(f"⚠️ Ödeme modülü yüklenemedi (Bot çalışmaya devam edecek): {e}")
-
     await bot.start()
     await userbot.start()
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V41.0 IMMORTAL ACTIVE")
+    print("✅ V44.0 PRO ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
