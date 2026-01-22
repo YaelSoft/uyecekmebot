@@ -7,10 +7,7 @@ import datetime
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-# 🔥 HAM VERİ KÜTÜPHANELERİ (Library'de özellik aramıyoruz, direkt motora bağlıyoruz)
-from pyrogram.raw.types import UpdateBotPrecheckoutQuery
-from pyrogram.raw.functions.messages import SetBotPrecheckoutResults
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 from pyrogram.errors import PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserAlreadyParticipant, FloodWait
 
 # ==================== ⚙️ AYARLAR ====================
@@ -36,12 +33,12 @@ PACKAGES = {
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV40")
+logger = logging.getLogger("YaelV41")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V40.0 RAW MODE Active 🟢"
+def home(): return "Yael Saver V41.0 IMMORTAL MODE Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -166,7 +163,8 @@ async def worker():
                 elif target_msg.photo: file_size = 1024
                 user_limit_bytes = get_user_size_limit(user_id)
                 if file_size > user_limit_bytes:
-                    await status_msg.edit(f"🛑 **LİMİT AŞIMI!**\nDosya: {file_size/1024/1024:.1f} MB\nLimitiniz: {user_limit_bytes/1024/1024:.0f} MB", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Yükselt", callback_data="shop"), InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
+                    await status_msg.edit(f"🛑 **LİMİT AŞIMI!**\nDosya: {file_size/1024/1024:.1f} MB\nLimitiniz: {user_limit_bytes/1024/1024:.0f} MB", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Yükselt", callback_data="shop"), InlineKeyboardButton("🔙 Menü", callback_data="back_home")]])
+                    )
                     continue
                 await status_msg.edit("⬇️ **İndiriliyor...**")
                 path = await userbot.download_media(target_msg)
@@ -271,7 +269,6 @@ async def cb_handler(client, callback):
         btns.append([InlineKeyboardButton("🔙 Geri", callback_data="back_home")])
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup(btns))
     elif data.startswith("buy_"):
-        from pyrogram.types import LabeledPrice
         pkg = data.split("_")[1]
         p = PACKAGES[pkg]
         await client.send_invoice(chat_id=uid, title=f"{p['name']} PAKET", description=f"{p['days']} Gün | {p['limit']} Dosya/Gün", payload=pkg, currency="XTR", prices=[LabeledPrice(label=p['name'], amount=p['stars'])], provider_token="")
@@ -287,26 +284,9 @@ async def cb_handler(client, callback):
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=f"https://t.me/share/url?url={link}"), InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
     elif data == "dl": await menu_switcher(client, callback.message, "📂 **Link gönder, indireyim.**", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
 
-# 🔥🔥🔥 RAW UPDATE HANDLER (DÜZ KONTAK ÖDEME) 🔥🔥🔥
-# Bu özellik kütüphanede "Yok" deseler bile çalışır. Motorun içine elimizi soktuk.
-@bot.on_raw_update()
-async def raw_payment_handler(client, update, users, chats):
-    # Eğer gelen veri "PrecheckoutQuery" ise (Yani ödeme onayı)
-    if isinstance(update, UpdateBotPrecheckoutQuery):
-        try:
-            # Elle onaylıyoruz. True = "Paramı alabilirsin" demek.
-            await client.invoke(SetBotPrecheckoutResults(
-                query_id=update.query_id,
-                success=True,
-                error=None
-            ))
-            print(f"💰 Ödeme Onayı Gönderildi: ID {update.query_id}")
-        except Exception as e:
-            print(f"❌ Ödeme Onay Hatası: {e}")
-
-# ✅ BAŞARILI ÖDEME (Bu standarttır, her sürümde çalışır)
-@bot.on_message(filters.successful_payment)
-async def success_pay(c, m):
+# ✅ ÖDEME HANDLER (ÇÖKMEZ MOD - TRY/EXCEPT)
+async def checkout_handler(c, q): await q.answer(ok=True)
+async def success_handler(c, m):
     pkg = m.successful_payment.invoice_payload
     add_vip(m.from_user.id, pkg)
     await m.reply("🎉 **Ödeme Başarılı!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Menü", callback_data="back_home")]]))
@@ -317,12 +297,23 @@ async def success_pay(c, m):
 # ==================== BAŞLATMA ====================
 async def main():
     print("🤖 Başlatılıyor...")
+    
+    # 🔥 HATA ÖNLEYİCİ BLOK 🔥
+    # Eğer kütüphane eksikse burayı atlar, bot ÇÖKMEZ.
+    try:
+        from pyrogram.handlers import PreCheckoutQueryHandler, MessageHandler
+        bot.add_handler(PreCheckoutQueryHandler(checkout_handler))
+        bot.add_handler(MessageHandler(success_handler, filters.successful_payment))
+        print("✅ Ödeme Modülü Yüklendi")
+    except Exception as e:
+        print(f"⚠️ Ödeme modülü yüklenemedi (Bot çalışmaya devam edecek): {e}")
+
     await bot.start()
     await userbot.start()
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V40.0 RAW MODE ACTIVE")
+    print("✅ V41.0 IMMORTAL ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
