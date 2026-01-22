@@ -8,8 +8,9 @@ from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-# Handler'ları manuel ekleyeceğiz, importlar önemli
-from pyrogram.handlers import PreCheckoutQueryHandler, MessageHandler
+# 🔥 HAM VERİ KÜTÜPHANELERİ (Library'de özellik aramıyoruz, direkt motora bağlıyoruz)
+from pyrogram.raw.types import UpdateBotPrecheckoutQuery
+from pyrogram.raw.functions.messages import SetBotPrecheckoutResults
 from pyrogram.errors import PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserAlreadyParticipant, FloodWait
 
 # ==================== ⚙️ AYARLAR ====================
@@ -24,7 +25,7 @@ OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 # 🔥🔥🔥 BOT ADINI YAZ (BAŞINDA @ YOK) 🔥🔥🔥
 FIXED_BOT_USERNAME = "YaelSaverBot"
 
-# 💰 FİYAT & LİMİT STRATEJİSİ (750 MB GÜVENLİ LİMİT)
+# 💰 FİYAT & LİMİT STRATEJİSİ
 PACKAGES = {
     "free":   {"name": "ÜCRETSİZ","days": 0,   "limit": 0,   "size_mb": 100, "stars": 0},
     "bronze": {"name": "BRONZ",   "days": 20,  "limit": 5,   "size_mb": 200, "stars": 100},
@@ -35,12 +36,12 @@ PACKAGES = {
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV39")
+logger = logging.getLogger("YaelV40")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V39.0 Manual Handler Mode Active 🟢"
+def home(): return "Yael Saver V40.0 RAW MODE Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -155,7 +156,7 @@ async def worker():
             target_msg = None
             try: target_msg = await userbot.get_messages(chat_id, msg_id)
             except:
-                txt = "🚫 **ERİŞİM SAĞLANAMADI**\n\n1️⃣ Grubun **Davet Linkini** atın.\n2️⃣ Link yoksa özel bot gerekir.\n👨‍💻 Destek: 'Admin & Hizmetler' butonu."
+                txt = "🚫 **ERİŞİM SAĞLANAMADI**\n\n1️⃣ Grubun **Davet Linkini** atın.\n2️⃣ Link yoksa özel bot gerekir."
                 await status_msg.edit(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
                 continue
             if target_msg and (target_msg.video or target_msg.photo or target_msg.document):
@@ -286,34 +287,42 @@ async def cb_handler(client, callback):
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=f"https://t.me/share/url?url={link}"), InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
     elif data == "dl": await menu_switcher(client, callback.message, "📂 **Link gönder, indireyim.**", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
 
-# ==================== 🔥 MANUEL HANDLER FONKSİYONLARI 🔥 ====================
-# Bu fonksiyonlar decorator (@bot.on_...) OLMADAN çalışır.
-async def checkout_handler(client, query):
-    await query.answer(ok=True)
+# 🔥🔥🔥 RAW UPDATE HANDLER (DÜZ KONTAK ÖDEME) 🔥🔥🔥
+# Bu özellik kütüphanede "Yok" deseler bile çalışır. Motorun içine elimizi soktuk.
+@bot.on_raw_update()
+async def raw_payment_handler(client, update, users, chats):
+    # Eğer gelen veri "PrecheckoutQuery" ise (Yani ödeme onayı)
+    if isinstance(update, UpdateBotPrecheckoutQuery):
+        try:
+            # Elle onaylıyoruz. True = "Paramı alabilirsin" demek.
+            await client.invoke(SetBotPrecheckoutResults(
+                query_id=update.query_id,
+                success=True,
+                error=None
+            ))
+            print(f"💰 Ödeme Onayı Gönderildi: ID {update.query_id}")
+        except Exception as e:
+            print(f"❌ Ödeme Onay Hatası: {e}")
 
-async def success_handler(client, message):
-    pkg = message.successful_payment.invoice_payload
-    add_vip(message.from_user.id, pkg)
-    await message.reply("🎉 **Ödeme Başarılı!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Menü", callback_data="back_home")]]))
-    try: await client.send_message(OWNER_ID, f"💰 SATIŞ: {pkg} - {message.from_user.id}")
+# ✅ BAŞARILI ÖDEME (Bu standarttır, her sürümde çalışır)
+@bot.on_message(filters.successful_payment)
+async def success_pay(c, m):
+    pkg = m.successful_payment.invoice_payload
+    add_vip(m.from_user.id, pkg)
+    await m.reply("🎉 **Ödeme Başarılı!**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Menü", callback_data="back_home")]]))
+    try: await c.send_message(OWNER_ID, f"💰 SATIŞ: {pkg} - {m.from_user.id}")
     except: pass
     await save_backup("Satış")
 
 # ==================== BAŞLATMA ====================
 async def main():
     print("🤖 Başlatılıyor...")
-    
-    # 🚨🚨 HATA ÇÖZÜMÜ BURADA 🚨🚨
-    # Decorator yerine handler'ları elle ekliyoruz. Bu yöntem sürüm fark etmeksizin çalışır.
-    bot.add_handler(PreCheckoutQueryHandler(checkout_handler))
-    bot.add_handler(MessageHandler(success_handler, filters.successful_payment))
-    
     await bot.start()
     await userbot.start()
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V39.0 WORKING")
+    print("✅ V40.0 RAW MODE ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
