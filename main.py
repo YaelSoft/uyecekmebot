@@ -8,10 +8,10 @@ import requests
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserAlreadyParticipant, FloodWait
 
-# 🔥 HAM VERİ (Ödeme Onayı İçin - Hata Vermez)
+# 🔥 HAM VERİ (Ödeme Onayı İçin)
 from pyrogram.raw.types import UpdateBotPrecheckoutQuery
 from pyrogram.raw.functions.messages import SetBotPrecheckoutResults
 
@@ -27,7 +27,7 @@ OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 # 🔥🔥🔥 BOT ADINI YAZ (BAŞINDA @ YOK) 🔥🔥🔥
 FIXED_BOT_USERNAME = "YaelSaverBot"
 
-# 💰 KREDİ PAKETLERİ (SÜRESİZ KONTÖR)
+# 💰 KREDİ PAKETLERİ (SÜRESİZ)
 PACKAGES = {
     "p100":  {"name": "🥉 100 KREDİ",  "amount": 100,  "price_label": "100 Stars", "price_amount": 100},
     "p250":  {"name": "🥈 250 KREDİ",  "amount": 250,  "price_label": "250 Stars", "price_amount": 250},
@@ -37,12 +37,12 @@ PACKAGES = {
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV52")
+logger = logging.getLogger("YaelV53")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V52.0 ULTIMATE PRO Active 🟢"
+def home(): return "Yael Saver V53.0 ULTIMATE PRO Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -72,10 +72,11 @@ async def save_backup(reason="Otomatik"):
     try:
         with open(DB_FILE, "w") as f: json.dump(db_cache, f, indent=4)
         total_users = len(db_cache.get("users", {}))
+        # Log kanalına sessizce at, rahatsız etmesin
         await bot.send_document(
             LOG_CHANNEL, 
             document=DB_FILE, 
-            caption=f"💾 **YEDEK** ({reason})\n⏰ {datetime.datetime.now().strftime('%H:%M')}\n👥 Üye: {total_users}"
+            caption=f"💾 **SİSTEM YEDEĞİ**\n📝 Sebep: {reason}\n⏰ {datetime.datetime.now().strftime('%d.%m %H:%M')}\n👥 Kullanıcı: {total_users}"
         )
     except: pass
 
@@ -89,24 +90,11 @@ def get_user(user_id):
     uid = str(user_id)
     if uid not in db_cache["users"]:
         db_cache["users"][uid] = {
-            "balance": 3,         # 🎁 YENİ GELENE 3 HAK HEDİYE
+            "balance": 3,         # Yeni gelene 3 hak
             "total_spent": 0,
             "invited_by": None
         }
     return db_cache["users"][uid]
-
-def check_rights(user_id):
-    if user_id == OWNER_ID: return True, "Patron"
-    u = get_user(user_id)
-    if u["balance"] > 0: return True, u["balance"]
-    return False, 0
-
-def use_right(user_id):
-    if user_id == OWNER_ID: return
-    uid = str(user_id)
-    if db_cache["users"][uid]["balance"] > 0:
-        db_cache["users"][uid]["balance"] -= 1
-        db_cache["users"][uid]["total_spent"] += 1
 
 def add_credits(user_id, amount):
     uid = str(user_id)
@@ -114,7 +102,7 @@ def add_credits(user_id, amount):
     db_cache["users"][uid]["balance"] += amount
     return db_cache["users"][uid]["balance"]
 
-# ==================== 💳 FATURA (HTTP REQUEST - HATA VERMEZ) ====================
+# ==================== 💳 FATURA (HTTP REQUEST) ====================
 def send_invoice_via_http(chat_id, package_key):
     try:
         pkg = PACKAGES[package_key]
@@ -124,93 +112,107 @@ def send_invoice_via_http(chat_id, package_key):
             "title": pkg["name"],
             "description": f"{pkg['amount']} Adet İndirme Kredisi (Süresiz)",
             "payload": package_key,
-            "provider_token": "", # Stars için boş
+            "provider_token": "", 
             "currency": "XTR",
             "prices": json.dumps([{"label": pkg["name"], "amount": pkg["price_amount"]}])
         }
         requests.post(url, data=payload)
     except: pass
 
-# ==================== 🏭 İŞÇİ (İNDİRME MOTORU) ====================
+# ==================== 🏭 İŞÇİ (AKILLI KUYRUK & HAK KONTROLÜ) ====================
 download_queue = asyncio.PriorityQueue()
 
 async def worker():
     print("👷 İşçi Hazır...")
     while True:
+        # Priority: Sayı ne kadar düşükse öncelik o kadar yüksektir.
         priority, task = await download_queue.get()
         client, status_msg, link, user_id = task
         try:
+            # 🛑 SON KEZ HAK KONTROLÜ (İNDİRMEDEN HEMEN ÖNCE)
+            user_data = get_user(user_id)
+            if user_data["balance"] <= 0:
+                await status_msg.edit(
+                    "⛔ **KREDİNİZ BİTTİ!**\n\nİndirme işlemi iptal edildi. Lütfen kredi yükleyiniz.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Kredi Yükle", callback_data="shop")]])
+                )
+                continue # İşlemi iptal et ve sonraki göreve geç
+
+            # Link Analizi
             chat_id, msg_id = None, None
             if "t.me/c/" in link:
                 parts = link.split("t.me/c/")[1].split("/")
                 chat_id = int("-100" + parts[0]); msg_id = int(parts[1].split("?")[0])
             else:
                 parts = link.split("t.me/")[1].split("/"); chat_id = parts[0]; msg_id = int(parts[1].split("?")[0])
-            target_msg = None
             
-            # 🔥 İNDİRME DENEMESİ
+            target_msg = None
             try: target_msg = await userbot.get_messages(chat_id, msg_id)
             except:
-                txt = (
-                    "🚫 **ERİŞİM SAĞLANAMADI**\n\n"
-                    "Bot bu kanalda (gizli kanal) bulunmuyor.\n"
-                    "Lütfen kanalın **Davet Linkini** (https://t.me/+...) bota atın.\n"
-                    "Bot gruba girince indirme yapabilir."
-                )
+                txt = "🚫 **ERİŞİM YOK!**\n\nBot bu kanalda değil. Lütfen kanalın **Davet Linkini** (t.me/+..) atın, bot girsin ve indirsin."
                 await status_msg.edit(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
                 continue
                 
             if target_msg and (target_msg.video or target_msg.photo or target_msg.document):
-                file_size = 0
-                if target_msg.video: file_size = target_msg.video.file_size
-                elif target_msg.document: file_size = target_msg.document.file_size
-                elif target_msg.photo: file_size = 1024
-                
-                # 2GB Render Limiti
-                if file_size > 2000 * 1024 * 1024:
-                    await status_msg.edit(f"🛑 **DOSYA ÇOK BÜYÜK!**\nSistem maksimum 2GB destekler.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
-                    continue
-                
                 await status_msg.edit("⬇️ **İndiriliyor...**")
                 path = await userbot.download_media(target_msg)
+                
                 await status_msg.edit("⬆️ **Yükleniyor...**")
-                caption = "✅ **Yael Saver**"
+                
+                # 🔥 PROFESYONEL CAPTION (ALTYAZI)
+                caption = f"📥 **İndirildi:** @{FIXED_BOT_USERNAME}\n🔓 **Kısıtlamaları Kaldırır!**"
                 
                 if target_msg.video: await client.send_video(user_id, path, caption=caption, width=target_msg.video.width, height=target_msg.video.height)
                 elif target_msg.photo: await client.send_photo(user_id, path, caption=caption)
                 elif target_msg.document: await client.send_document(user_id, path, caption=caption)
                 
-                use_right(user_id)
-                u = get_user(user_id)
-                await status_msg.edit(f"✅ **Tamamlandı!**\n💰 Kalan Kredi: **{u['balance']}**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
+                # 📉 HAKKI DÜŞÜR VE KAYDET
+                db_cache["users"][str(user_id)]["balance"] -= 1
+                db_cache["users"][str(user_id)]["total_spent"] += 1
+                new_bal = db_cache["users"][str(user_id)]["balance"]
+                
+                await status_msg.edit(f"✅ **İşlem Başarılı!**\n💰 Kalan Kredi: **{new_bal}**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
+                
                 if os.path.exists(path): os.remove(path)
-            else: await status_msg.edit("❌ Medya bulunamadı veya desteklenmiyor.")
+                
+                # Her 5 indirmede bir yedek al (Garanti olsun)
+                if db_cache["users"][str(user_id)]["total_spent"] % 5 == 0:
+                    asyncio.create_task(save_backup("Otomatik Kayıt"))
+                    
+            else: await status_msg.edit("❌ Medya bulunamadı.")
         except Exception as e:
             try: await status_msg.edit(f"❌ Hata: {e}")
             except: pass
             if 'path' in locals() and os.path.exists(path): os.remove(path)
         await asyncio.sleep(2)
 
-# ==================== ⚡ PROFESYONEL MENÜLER ====================
+# ==================== ⚡ ARAYÜZ (PROFESYONEL) ====================
 def main_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📂 İçerik İndir", callback_data="dl"), InlineKeyboardButton("💰 Cüzdanım", callback_data="acc")],
-        [InlineKeyboardButton("🛒 KREDİ YÜKLE", callback_data="shop")],
-        [InlineKeyboardButton("❓ Nasıl Kullanılır?", callback_data="howto"), InlineKeyboardButton("👥 Referans", callback_data="ref")],
-        [InlineKeyboardButton("👨‍💻 Admin & Bot Hizmetleri", callback_data="service")]
+        [InlineKeyboardButton("📥 İçerik İndir", callback_data="dl"), InlineKeyboardButton("💰 Cüzdanım", callback_data="acc")],
+        [InlineKeyboardButton("🛒 KREDİ MAĞAZASI 🛒", callback_data="shop")],
+        [InlineKeyboardButton("❓ Nasıl Çalışır?", callback_data="howto"), InlineKeyboardButton("👥 Referans", callback_data="ref")],
+        [InlineKeyboardButton("👨‍💻 Admin & Özel Bot Hizmetleri", callback_data="service")]
+    ])
+
+def admin_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Kredi Yükle", callback_data="admin_add_info"), InlineKeyboardButton("📢 Duyuru Yap", callback_data="admin_cast_info")],
+        [InlineKeyboardButton("📊 Genel Durum", callback_data="admin_stats"), InlineKeyboardButton("💾 Yedek Al", callback_data="admin_backup")],
+        [InlineKeyboardButton("🔙 Çıkış", callback_data="back_home")]
     ])
 
 async def menu_switcher(client, message, text, reply_markup=None):
-    try: await message.delete()
-    except: pass
-    try: await client.send_message(message.chat.id, text, reply_markup=reply_markup, disable_web_page_preview=True)
-    except: pass
+    try: await message.edit(text, reply_markup=reply_markup)
+    except: 
+        try: await client.send_message(message.chat.id, text, reply_markup=reply_markup)
+        except: pass
 
 @bot.on_message(filters.command("start"))
 async def start(client, message):
     user_id = message.from_user.id
-    u = get_user(user_id) # İlk girişte 3 hak verir
-    
+    u = get_user(user_id)
+    # Referans
     if len(message.command) > 1:
         try:
             ref_id = message.command[1]
@@ -221,59 +223,55 @@ async def start(client, message):
                     db_cache["users"][str(user_id)]["balance"] += 3 
                     if str(ref_id) in db_cache["users"]:
                         db_cache["users"][str(ref_id)]["balance"] += 2
-                        try: await client.send_message(int(ref_id), "🎉 **Referans!** Cüzdanına +2 Kredi eklendi.")
+                        try: await client.send_message(int(ref_id), "🎉 **Referans Kazancı!** +2 Kredi eklendi.")
                         except: pass
         except: pass
-    await menu_switcher(client, message, f"👋 **Merhaba {message.from_user.first_name}!**\n\nTelegram'ın en hızlı ve güvenli içerik indirme botuna hoş geldin.\n\n🎁 **Hoşgeldin Hediyesi:** Hesabına 3 Kredi tanımlandı!\n\n👇 **İşleminizi Seçiniz:**", main_menu())
+    await menu_switcher(client, message, f"👋 **Merhaba {message.from_user.first_name}!**\n\nTelegram'ın en güçlü içerik indirme botuna hoş geldin.\n\n🎁 **Hediye Bakiyen:** 3 Kredi\n\n👇 **Menüden işlem seçiniz:**", main_menu())
 
-# 🔥 DUYURU VE HEDİYE KOMUTU (SENİN İÇİN)
-@bot.on_message(filters.command("update_bonus") & filters.user(OWNER_ID))
-async def update_bonus_gift(client, message):
-    await message.reply("🚀 **Toplu Gönderim Başladı...**")
-    c = 0
-    txt = (
-        "🚀 **SİSTEM GÜNCELLEMESİ TAMAMLANDI!**\n\n"
-        "Değerli Kullanıcımız,\n"
-        "✅ Ödeme sistemi yenilendi (Kredi/Kontör).\n"
-        "✅ İndirme sorunları ve hatalar giderildi.\n"
-        "✅ Yeni profesyonel arayüze geçildi.\n\n"
-        "🎁 **TELAFİ HEDİYESİ:**\n"
-        "Yaşanan aksaklıklar nedeniyle hesabınıza **+3 KREDİ** tanımlanmıştır.\n\n"
-        "İyi kullanımlar dileriz! 🌹"
-    )
-    for uid in db_cache["users"]:
-        try:
-            db_cache["users"][uid]["balance"] += 3
-            await client.send_message(int(uid), txt)
-            c += 1
-            await asyncio.sleep(0.05)
-        except: pass
-    await save_backup("Update Bonus")
-    await message.reply(f"✅ **Tamamlandı!**\n🎁 {c} kişiye hediye ve mesaj iletildi.")
+# 👑 ADMIN PANELİ
+@bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
+async def admin_cmd(client, message):
+    await menu_switcher(client, message, "👑 **YÖNETİCİ KONTROL PANELİ**\n\nHoşgeldiniz efendim. İstatistikler güncel.", admin_menu())
 
 @bot.on_message(filters.command("addcredit") & filters.user(OWNER_ID))
-async def manual_credit_add(client, message):
+async def manual_add(client, message):
     try:
         parts = message.command
-        target_id = int(parts[1])
+        target = int(parts[1])
         amount = int(parts[2])
-        new_bal = add_credits(target_id, amount)
-        await save_backup("Manuel Kredi")
-        await message.reply(f"✅ **Yüklendi!**\n🆔 `{target_id}`\n💰 +{amount} Kredi")
-        try: await client.send_message(target_id, f"🎉 **KREDİ YÜKLENDİ!**\n\nHesabınıza **{amount} Kredi** eklendi.\nKeyifli indirmeler!")
+        new = add_credits(target, amount)
+        await save_backup("Manuel Ekleme")
+        await message.reply(f"✅ **Yüklendi!**\n👤 ID: `{target}`\n💰 Tutar: {amount}\n🏦 Yeni Bakiye: {new}")
+        try: await client.send_message(target, f"🎉 **TEBRİKLER!**\n\nHesabınıza **{amount} Kredi** yüklendi.\nKeyifli kullanımlar!")
         except: pass
     except: await message.reply("❌ Hata: `/addcredit ID MİKTAR`")
 
+@bot.on_message(filters.command("duyuru") & filters.user(OWNER_ID))
+async def broadcast(client, message):
+    if len(message.command) < 2: return await message.reply("❌ Mesaj yazın.")
+    text = message.text.split(None, 1)[1]
+    msg = await message.reply("📢 **Gönderiliyor...**")
+    c = 0
+    for uid in db_cache["users"]:
+        try: await client.send_message(int(uid), f"📢 **DUYURU**\n\n{text}"); c+=1; await asyncio.sleep(0.05)
+        except: pass
+    await msg.edit(f"✅ **Tamamlandı!**\n👥 {c} kişiye ulaşıldı.")
+
+# 🔗 LİNK YAKALAYICI
 @bot.on_message(filters.regex(r"https://t.me/") & filters.private)
 async def dl_link(client, message):
     if "join" in message.text: return
     user_id = message.from_user.id
-    allowed, left = check_rights(user_id)
-    if not allowed:
-        return await message.reply("⛔ **BAKİYENİZ YETERSİZ!**\n\nİndirme yapmak için kredi yüklemeniz gerekmektedir.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Kredi Yükle", callback_data="shop")]]))
+    u = get_user(user_id)
     
-    st = await message.reply(f"⏳ **Sıraya Alındı...**")
-    await download_queue.put((1, (client, st, message.text, user_id)))
+    # 🛑 İLK KONTROL (MENÜDE)
+    if u["balance"] <= 0:
+        return await message.reply("⛔ **BAKİYENİZ TÜKENDİ!**\n\nDevam etmek için kredi yüklemelisiniz.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Kredi Yükle", callback_data="shop")]]))
+    
+    # Öncelik Ayarı (Parası olan öne geçer)
+    prio = 1 if u["balance"] > 20 else 5
+    st = await message.reply(f"⏳ **Sıraya Alındı...**\nLütfen bekleyiniz.")
+    await download_queue.put((prio, (client, st, message.text, user_id)))
 
 @bot.on_callback_query()
 async def cb_handler(client, callback):
@@ -285,49 +283,60 @@ async def cb_handler(client, callback):
     
     if data == "back_home": await menu_switcher(client, callback.message, f"👋 **Ana Menü**", main_menu())
     
-    elif data == "howto": await menu_switcher(client, callback.message, "❓ **NASIL KULLANILIR?**\n\n1️⃣ İndirmek istediğiniz içeriğin linkini kopyalayın.\n2️⃣ Linki kopyalayıp bu bota gönderin.\n\n🛑 **'Erişim Yok' Hatası:**\nEğer bot 'Erişim Yok' derse, o gizli kanalda değildir. Kanalın/Grubun **Davet Linkini** bota atın, bot girsin ve indirsin.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
-    elif data == "service": await menu_switcher(client, callback.message, f"👨‍💻 **ADMİN & YAZILIM HİZMETLERİ**\n\nBu bot gibi projeler, toplu veri çekme, otomasyon ve özel yazılımlar için iletişime geçebilirsiniz.\n\n📞 **İletişim:** @{OWNER_USERNAME}", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
-    
+    # 👑 ADMIN
+    elif data == "admin_stats":
+        tot = len(db_cache.get("users", {}))
+        cre = sum(x["balance"] for x in db_cache["users"].values())
+        paid_users = sum(1 for x in db_cache["users"].values() if x["total_spent"] > 5)
+        await menu_switcher(client, callback.message, f"📊 **İSTATİSTİKLER**\n\n👥 Toplam Üye: **{tot}**\n💰 Dolaşımdaki Kredi: **{cre}**\n💎 Aktif Müşteri: **{paid_users}**", admin_menu())
+    elif data == "admin_backup":
+        await save_backup("Manuel")
+        await callback.answer("✅ Yedeklendi!", show_alert=True)
+    elif data == "admin_add_info": await client.send_message(uid, "ℹ️ `/addcredit ID MİKTAR`")
+    elif data == "admin_cast_info": await client.send_message(uid, "ℹ️ `/duyuru MESAJ`")
+
+    # 👤 USER
     elif data == "shop":
-        txt = "🛒 **KREDİ MARKETİ**\n\nPaketler süresizdir. Sadece kullandıkça düşer.\n**Telegram Stars (Yıldız)** ile anında ve güvenli satın alabilirsiniz.\n\n"
+        txt = "🛒 **KREDİ MARKETİ**\n\nKredileriniz asla silinmez. Kullandıkça düşer.\n**Telegram Stars** ile güvenle satın alabilirsiniz.\n\n"
         btns = []
         for k, v in PACKAGES.items():
-            txt += f"🔸 **{v['name']}**\n   └ 💸 Fiyat: {v['price_label']}\n\n"
+            txt += f"🔸 **{v['name']}**\n   └ 💸 {v['price_label']}\n\n"
             btns.append([InlineKeyboardButton(f"{v['name']} SATIN AL", callback_data=f"buy_{k}")])
         btns.append([InlineKeyboardButton("🔙 Geri", callback_data="back_home")])
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup(btns))
-
+        
     elif data.startswith("buy_"):
-        pkg_key = data.split("_")[1]
-        send_invoice_via_http(uid, pkg_key)
+        pkg = data.split("_")[1]
+        send_invoice_via_http(uid, pkg)
         await callback.answer("✅ Fatura oluşturuldu, sohbete bak!", show_alert=True)
 
     elif data == "acc":
         bal = u['balance']
-        spent = u.get('total_spent', 0)
-        txt = f"💰 **CÜZDANIM**\n\n💳 Mevcut Kredi: **{bal}**\n📉 Harcanan: **{spent}**\n♾️ Kredilerde son kullanım tarihi yoktur."
+        tot = u.get('total_spent', 0)
+        txt = f"💰 **CÜZDANIM**\n\n💳 Mevcut Kredi: **{bal}**\n📉 Toplam Harcanan: **{tot}**\n♾️ Krediler süresizdir."
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
-    elif data == "ref":
-        link = f"https://t.me/{FIXED_BOT_USERNAME}?start={uid}"
-        txt = f"👥 **REFERANS SİSTEMİ**\n\nArkadaşını davet et, **+2 Kredi** kazan!\n🔗 `{link}`"
-        await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=f"https://t.me/share/url?url={link}"), InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
-    elif data == "dl": await menu_switcher(client, callback.message, "📂 **İndirme Modu**\n\nLink gönderebilirsiniz.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
+        
+    elif data == "howto":
+        txt = "❓ **NASIL KULLANILIR?**\n\n1️⃣ İçerik linkini kopyalayın.\n2️⃣ Bu bota gönderin.\n3️⃣ Bot indirip size göndersin.\n\n⚠️ **HATA ALIRSANIZ:**\nBot 'Erişim Yok' derse, o kanalın davet linkini bota atın."
+        await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
+        
+    elif data == "service":
+        txt = f"👨‍💻 **ADMİN & HİZMETLER**\n\nBu botun yazılımı ve yönetimi @{OWNER_USERNAME} aittir.\nBenzer projeler için ulaşabilirsiniz."
+        await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
+        
+    elif data == "dl": await menu_switcher(client, callback.message, "📂 **İndirme Modu**\n\nLütfen indirmek istediğiniz linki yapıştırın.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
 
-# 🔥 ÖDEME ONAYI (HAM VERİ - ASLA HATA VERMEZ)
+# 🔥 ÖDEME ONAYI (HAM VERİ)
 @bot.on_raw_update()
 async def raw_payment_handler(client, update, users, chats):
     if isinstance(update, UpdateBotPrecheckoutQuery):
-        try:
-            await client.invoke(SetBotPrecheckoutResults(query_id=update.query_id, success=True, error=None))
+        try: await client.invoke(SetBotPrecheckoutResults(query_id=update.query_id, success=True, error=None))
         except: pass
 
-# 🔥 EL YAPIMI FİLTRE (VERSION HATASINI YENER)
-def is_successful_payment(_, __, message):
-    return bool(message.successful_payment)
-
+# 🔥 EL YAPIMI FİLTRE
+def is_successful_payment(_, __, message): return bool(message.successful_payment)
 payment_filter = filters.create(is_successful_payment)
 
-# ✅ BAŞARILI ÖDEME
 @bot.on_message(payment_filter)
 async def success_pay(c, m):
     pkg_key = m.successful_payment.invoice_payload
@@ -335,8 +344,8 @@ async def success_pay(c, m):
     if pkg:
         amount = pkg["amount"]
         add_credits(m.from_user.id, amount)
-        await m.reply(f"🎉 **Ödeme Başarılı!**\n\nhesabınıza **{amount} Kredi** eklendi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 Cüzdanım", callback_data="acc")]]))
-        try: await c.send_message(OWNER_ID, f"💰 SATIŞ: {pkg['name']} - {m.from_user.first_name}")
+        await m.reply(f"🎉 **ÖDEME BAŞARILI!**\n\nHesabınıza **{amount} Kredi** eklendi.\nTeşekkürler!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 Cüzdanım", callback_data="acc")]]))
+        try: await c.send_message(OWNER_ID, f"💰 **SATIŞ:** {pkg['name']} - {m.from_user.first_name}")
         except: pass
         await save_backup("Satış")
 
@@ -348,7 +357,7 @@ async def main():
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V52.0 ULTIMATE FINAL ACTIVE")
+    print("✅ V53.0 REDEMPTION ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
