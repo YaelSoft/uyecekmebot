@@ -26,44 +26,49 @@ OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 # 🔥 BOT KULLANICI ADI (BAŞINDA @ YOK)
 FIXED_BOT_USERNAME = "YaelSaverBot"
 
-# 🔗 ABONELİK LİNKLERİ (MANUEL SATIŞ İÇİN)
-LINK_SUB_TRIAL = "https://t.me/yasin33"
-LINK_SUB_MID   = "https://t.me/yasin33"
-LINK_SUB_HIGH  = "https://t.me/yasin33"
+# 🔗 ABONELİK LİNKLERİ (GRUP GİRİŞLERİ)
+LINK_SUB_TRIAL = "https://t.me/+CqcEl_4PUgE1YWFh" # 200 Yıldızlık Grup
+LINK_SUB_MID   = "https://t.me/+AxzfBTfLlHVlNWQx" # 750 Yıldızlık Grup
+LINK_SUB_HIGH  = "https://t.me/+TM943UrHw-QxNzgx" # 1250 Yıldızlık Grup
 
-# ==================== 💰 VARSAYILAN FİYATLAR ====================
-# Bu değerler veritabanı boşsa kullanılır. Doluysa veritabanından çekilir.
+# ==================== 💰 YENİ TİCARİ DENGE FİYATLARI ====================
+
+# 1️⃣ KREDİ PAKETLERİ (OTOMATİK - ZAMLI)
+# Müşteriyi aboneliğe itmek için kredi fiyatlarını artırdık.
 DEFAULT_CREDIT_PACKS = {
-    "c100":  {"name": "🥉 100 KREDİ",  "amount": 100,  "price_amt": 100},
-    "c250":  {"name": "🥈 250 KREDİ",  "amount": 250,  "price_amt": 250},
-    "c500":  {"name": "🥇 500 KREDİ",  "amount": 500,  "price_amt": 500},
-    "c1000": {"name": "💎 1000 KREDİ", "amount": 1000, "price_amt": 900}
+    "c100":  {"name": "🥉 100 KREDİ",  "amount": 100,  "price_amt": 150},  # ~75 TL (Dengeleyici Fiyat)
+    "c250":  {"name": "🥈 250 KREDİ",  "amount": 250,  "price_amt": 350},
+    "c500":  {"name": "🥇 500 KREDİ",  "amount": 500,  "price_amt": 650},
+    "c1000": {"name": "💎 1000 KREDİ", "amount": 1000, "price_amt": 1200}
 }
-
-# Global değişken (Veritabanından güncellenecek)
 CREDIT_PACKS = DEFAULT_CREDIT_PACKS.copy()
 
+# 2️⃣ ABONELİK PAKETLERİ (MANUEL - CAZİP)
 SUB_PACKS = {
-    "sub_trial": {"name": "⚡ DENEME (30 Gün)", "days": 30, "daily_limit": 5,  "desc": "Günde 5 Hak",  "link": LINK_SUB_TRIAL},
-    "sub_mid":   {"name": "🔥 STANDART (30 Gün)", "days": 30, "daily_limit": 25, "desc": "Günde 25 Hak", "link": LINK_SUB_MID},
-    "sub_high":  {"name": "👑 PRO (30 Gün)",    "days": 30, "daily_limit": 50, "desc": "Günde 50 Hak", "link": LINK_SUB_HIGH}
+    "sub_trial": {"name": "⚡ BRONZ (30 Gün)",   "days": 30, "daily_limit": 5,  "desc": "Günde 5 Hak",  "price_lbl": "200 ⭐",  "link": LINK_SUB_TRIAL},
+    "sub_mid":   {"name": "🔥 GÜMÜŞ (30 Gün)",   "days": 30, "daily_limit": 25, "desc": "Günde 25 Hak", "price_lbl": "750 ⭐",  "link": LINK_SUB_MID},
+    "sub_high":  {"name": "👑 ALTIN (30 Gün)",    "days": 30, "daily_limit": 50, "desc": "Günde 50 Hak", "price_lbl": "1250 ⭐", "link": LINK_SUB_HIGH}
 }
+
+# 🛡️ LİMİTLER
+LIMIT_FREE = 50 * 1024 * 1024    # 50 MB
+LIMIT_VIP  = 500 * 1024 * 1024   # 500 MB
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV61")
+logger = logging.getLogger("YaelV70")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V61.0 DYNAMIC PRICES Active 🟢"
+def home(): return "Yael Saver V70.0 COMMERCIAL BALANCE Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
 bot = Client("sales_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 userbot = Client("sales_userbot", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
 
-# ==================== 💾 VERİTABANI & KONFIGÜRASYON ====================
+# ==================== 💾 VERİTABANI ====================
 db_cache = {"users": {}, "config": {"prices": DEFAULT_CREDIT_PACKS.copy()}}
 
 async def restore_data():
@@ -76,12 +81,10 @@ async def restore_data():
                 with open(DB_FILE, "r") as f:
                     data = json.load(f)
                     if "users" in data: db_cache = data
-                    
-                    # 🔥 FİYATLARI GERİ YÜKLE
                     if "config" in data and "prices" in data["config"]:
                         CREDIT_PACKS = data["config"]["prices"]
-                        print("✅ Fiyatlar veritabanından güncellendi.")
-                    
+                        for k, v in CREDIT_PACKS.items():
+                            if "price_amt" in v: v["price_lbl"] = f"{v['price_amt']} ⭐"
                 print(f"✅ DATA YÜKLENDİ: {len(db_cache['users'])} kullanıcı.")
                 return
     except: pass
@@ -90,16 +93,10 @@ async def save_backup(reason="Otomatik"):
     global db_cache, CREDIT_PACKS
     if LOG_CHANNEL == 0: return
     try:
-        # Fiyatları da kaydet
         db_cache["config"] = {"prices": CREDIT_PACKS}
-        
         with open(DB_FILE, "w") as f: json.dump(db_cache, f, indent=4)
         total_users = len(db_cache.get("users", {}))
-        await bot.send_document(
-            LOG_CHANNEL, 
-            document=DB_FILE, 
-            caption=f"💾 YEDEK ({reason})\n👥 {total_users} Üye\n💰 Fiyatlar Güncel"
-        )
+        await bot.send_document(LOG_CHANNEL, document=DB_FILE, caption=f"💾 YEDEK ({reason})\n👥 {total_users}")
     except: pass
 
 async def backup_loop():
@@ -136,6 +133,16 @@ def check_access(user_id):
     if u["balance"] > 0: return True, "Kredi"
     return False, "Yetersiz"
 
+# KOTA KONTROLÜ
+def get_size_limit(user_id):
+    if user_id == OWNER_ID: return 100 * 1024 * 1024 * 1024
+    u = get_user(user_id)
+    is_vip = False
+    if u["sub_type"] != "none": is_vip = True
+    elif u["total_spent"] > 0: is_vip = True 
+    if is_vip: return LIMIT_VIP
+    return LIMIT_FREE
+
 def use_right(user_id):
     if user_id == OWNER_ID: return "Admin"
     uid = str(user_id)
@@ -163,10 +170,11 @@ def activate_subscription(user_id, sub_key):
     db_cache["users"][uid]["daily_usage"] = 0
     return pkg["name"]
 
-# ==================== 💳 FATURA & FİYAT YÖNETİMİ ====================
+# ==================== 💳 FATURA (OTOMATİK) ====================
 def send_invoice_via_http(chat_id, package_key):
     try:
         pkg = CREDIT_PACKS[package_key]
+        price_amt = pkg["price_amt"]
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendInvoice"
         payload = {
             "chat_id": chat_id,
@@ -175,7 +183,7 @@ def send_invoice_via_http(chat_id, package_key):
             "payload": f"cred_{package_key}",
             "provider_token": "", 
             "currency": "XTR",
-            "prices": json.dumps([{"label": pkg["name"], "amount": pkg["price_amt"]}])
+            "prices": json.dumps([{"label": pkg["name"], "amount": price_amt}])
         }
         requests.post(url, data=payload)
     except: pass
@@ -217,6 +225,23 @@ async def worker():
                 continue
                 
             if target_msg and (target_msg.video or target_msg.photo or target_msg.document):
+                file_size = 0
+                if target_msg.video: file_size = target_msg.video.file_size
+                elif target_msg.document: file_size = target_msg.document.file_size
+                elif target_msg.photo: file_size = 1024 
+                
+                user_limit = get_size_limit(user_id)
+                if file_size > user_limit:
+                    is_vip = (user_limit == LIMIT_VIP)
+                    if not is_vip:
+                        msg_txt = f"⚠️ **LİMİT (50 MB)**\n\nBu dosya ücretsiz limitin üzerindedir.\n🚀 **500 MB** indirmek için Premium alın."
+                        btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 Premium Al", callback_data="shop_home")]])
+                    else:
+                        msg_txt = f"🛑 **SİSTEM SINIRI (500 MB)**\nBu dosya teknik sınırı aşıyor."
+                        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]])
+                    await status_msg.edit(msg_txt, reply_markup=btn)
+                    continue
+
                 await status_msg.edit("⬇️ **İndiriliyor...**")
                 path = await userbot.download_media(target_msg)
                 await status_msg.edit("⬆️ **Yükleniyor...**")
@@ -256,8 +281,8 @@ def main_menu():
 
 def shop_home_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 KREDİ PAKETLERİ", callback_data="shop_credits")],
-        [InlineKeyboardButton("📅 AYLIK ABONELİK", callback_data="shop_subs")],
+        [InlineKeyboardButton("💰 KREDİ (Otomatik)", callback_data="shop_credits")],
+        [InlineKeyboardButton("📅 ABONELİK (Yıldızla Gruba Gir)", callback_data="shop_subs")],
         [InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]
     ])
 
@@ -286,7 +311,7 @@ async def start(client, message):
         except: pass
     await menu_switcher(client, message, f"👋 **Merhaba {message.from_user.first_name}!**\n\nTelegram'ın en hızlı indiricisine hoş geldin.\n🎁 **Hediye:** 3 Kredi Tanımlandı.\n\n👇 **Menü:**", main_menu())
 
-# 👑 ADMIN & FİYAT YÖNETİMİ
+# 👑 ADMIN
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
 async def admin_cmd(client, message):
     tot = len(db_cache["users"])
@@ -300,7 +325,6 @@ async def admin_cmd(client, message):
 
 @bot.on_message(filters.command("setprice") & filters.user(OWNER_ID))
 async def set_price(c, m):
-    # Kullanım: /setprice c100 80
     try:
         code = m.command[1]
         price = int(m.command[2])
@@ -309,30 +333,26 @@ async def set_price(c, m):
             CREDIT_PACKS[code]["price_lbl"] = f"{price} ⭐"
             await m.reply(f"✅ **Güncellendi:** {code} -> {price} ⭐")
             await save_backup("Fiyat Güncelleme")
-        else: await m.reply("❌ Paket kodu geçersiz (c100, c250...)")
+        else: await m.reply("❌ Paket kodu geçersiz")
     except: await m.reply("❌ `/setprice [KOD] [YENİ_FİYAT]`")
 
 @bot.on_message(filters.command("discount") & filters.user(OWNER_ID))
 async def discount_cmd(c, m):
-    # Kullanım: /discount 20 (%20 indirim yapar)
-    # Sıfırlamak için: /discount 0 (Varsayılan fiyatlara döner)
     try:
         percent = int(m.command[1])
         if percent == 0:
-            # Sıfırla
             global CREDIT_PACKS
             CREDIT_PACKS = DEFAULT_CREDIT_PACKS.copy()
-            await m.reply("✅ İndirimler kaldırıldı, fiyatlar sıfırlandı.")
+            await m.reply("✅ İndirimler kaldırıldı.")
         else:
-            # İndirim Uygula
             for k, v in CREDIT_PACKS.items():
                 original = DEFAULT_CREDIT_PACKS[k]["price_amt"]
                 new_price = int(original - (original * percent / 100))
                 CREDIT_PACKS[k]["price_amt"] = new_price
                 CREDIT_PACKS[k]["price_lbl"] = f"{new_price} ⭐ (⬇️%{percent})"
-            await m.reply(f"✅ Tüm paketlere **%{percent}** indirim uygulandı!")
-        await save_backup("İndirim Ayarı")
-    except: await m.reply("❌ `/discount [YÜZDE]` (Örn: `/discount 20` veya `/discount 0`)")
+            await m.reply(f"✅ %{percent} İndirim Uygulandı!")
+        await save_backup("İndirim")
+    except: await m.reply("❌ `/discount [YÜZDE]`")
 
 @bot.on_message(filters.command("addcredit") & filters.user(OWNER_ID))
 async def manual_c(c, m):
@@ -391,17 +411,18 @@ async def cb_handler(client, callback):
         txt = "💰 **KREDİ PAKETLERİ (OTOMATİK)**\nSatın al'a basınca fatura çıkar.\n\n"
         btns = []
         for k, v in CREDIT_PACKS.items():
-            txt += f"🔸 **{v['name']}** -> {v['price_lbl']}\n"
-            btns.append([InlineKeyboardButton(f"Satın Al: {v['price_lbl']}", callback_data=f"buy_c_{k}")])
+            lbl = v.get("price_lbl", f"{v['price_amt']} ⭐")
+            txt += f"🔸 **{v['name']}** -> {lbl}\n"
+            btns.append([InlineKeyboardButton(f"Satın Al: {lbl}", callback_data=f"buy_c_{k}")])
         btns.append([InlineKeyboardButton("🔙 Geri", callback_data="shop_home")])
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup(btns))
         
     elif data == "shop_subs":
-        txt = "📅 **AYLIK ABONELİKLER (MANUEL)**\nSatın almak için butona tıklayın, yönlendirileceksiniz.\n\n"
+        txt = "📅 **ABONELİK PAKETLERİ**\nLinke tıklayıp Yıldız ile gruba girin.\nYönetici aboneliği manuel tanımlayacaktır.\n\n"
         btns = []
         for k, v in SUB_PACKS.items():
             txt += f"🔹 **{v['name']}**\n   └ {v['desc']} -> {v['price_lbl']}\n"
-            btns.append([InlineKeyboardButton(f"SATIN AL ({v['name']})", url=v['link'])])
+            btns.append([InlineKeyboardButton(f"GRUBA GİR & ÖDE ({v['name']})", url=v['link'])])
         btns.append([InlineKeyboardButton("🔙 Geri", callback_data="shop_home")])
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup(btns))
 
@@ -423,7 +444,6 @@ async def cb_handler(client, callback):
         txt = f"👥 **REFERANS**\nArkadaşını davet et, **+2 Kredi** kazan!\n\n🔗 `{link}`"
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=f"https://t.me/share/url?url={link}"), InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
     
-    # 👑 ADMIN FONKSİYONLARI
     elif data == "admin_stats":
         t = str(len(db_cache.get("users", {})))
         c = str(sum(x.get("balance", 0) for x in db_cache["users"].values()))
@@ -434,13 +454,12 @@ async def cb_handler(client, callback):
         await callback.answer("✅ Yedek Kanalına Gönderildi!", show_alert=True)
     elif data == "admin_prices":
         txt = "💰 **MEVCUT FİYATLAR**\n\n"
-        for k, v in CREDIT_PACKS.items(): txt += f"🔹 `{k}`: {v['price_lbl']}\n"
-        txt += "\n🛠 **Değiştirmek İçin:**\n`/setprice c100 80`"
+        for k, v in CREDIT_PACKS.items(): txt += f"🔹 `{k}`: {v.get('price_lbl', v['price_amt'])}\n"
+        txt += "\n🛠 **Değiştirmek İçin:**\n`/setprice c100 150`"
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
-    elif data == "admin_discount_info":
-        await client.send_message(uid, "ℹ️ **İNDİRİM KOMUTU**\n`/discount 20` -> %20 İndirim Yapar\n`/discount 0` -> İndirimi Kaldırır")
+    elif data == "admin_discount_info": await client.send_message(uid, "ℹ️ `/discount 20` (%20 İndirim)\n`/discount 0` (Sıfırla)")
     elif data == "admin_addc": await client.send_message(uid, "ℹ️ `/addcredit ID MİKTAR`")
-    elif data == "admin_adds": await client.send_message(uid, "ℹ️ `/setsub ID sub_trial`")
+    elif data == "admin_adds": await client.send_message(uid, "ℹ️ `/setsub ID sub_trial`\nPaketler: sub_trial, sub_mid, sub_high")
     elif data == "admin_cast": await client.send_message(uid, "ℹ️ `/duyuru MESAJ`")
     
     elif data == "howto": await menu_switcher(client, callback.message, "❓ **YARDIM**\n\n1️⃣ İçerik linkini bota at.\n2️⃣ Bot indirip sana yollasın.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
@@ -478,7 +497,7 @@ async def main():
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V61.0 DYNAMIC ADMIN ACTIVE")
+    print("✅ V70.0 COMMERCIAL BALANCE ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
