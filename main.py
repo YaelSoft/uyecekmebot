@@ -29,7 +29,7 @@ FIXED_BOT_USERNAME = "YaelSaverBot"
 # 🔗 ABONELİK LİNKLERİ (GRUP GİRİŞLERİ)
 LINK_SUB_TRIAL = "https://t.me/+CqcEl_4PUgE1YWFh" # 200 Yıldızlık Grup
 LINK_SUB_MID   = "https://t.me/+AxzfBTfLlHVlNWQx" # 750 Yıldızlık Grup
-LINK_SUB_HIGH  = "https://t.me/+TM943UrHw-QxNzgx" # 1250 Yıldızlık Grup
+LINK_SUB_HIGH  = "https://t.me/+TM943UrHw-QxNzgx" # 1250 Yıldızlık Grup 
 
 # ==================== 💰 FİYATLAR & LİMİTLER ====================
 
@@ -52,12 +52,12 @@ LIMIT_VIP  = 500 * 1024 * 1024
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV74")
+logger = logging.getLogger("YaelV75")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V74.0 MASTERPIECE Active 🟢"
+def home(): return "Yael Saver V75.0 DEEP MEMORY Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -99,6 +99,18 @@ async def backup_loop():
     while True:
         await asyncio.sleep(3600)
         await save_backup(reason="Saatlik")
+
+# 🔥🔥🔥 USERBOT DERİN HAFIZA TAZELEME (FIX) 🔥🔥🔥
+async def force_cache_refresh():
+    print("🔄 Userbot tüm kanalları tarıyor... (Bu işlem 10-30sn sürebilir)")
+    try:
+        count = 0
+        # Tüm dialogları gezerek Pyrogram'ın bu ID'leri tanımasını sağlıyoruz.
+        async for dialog in userbot.get_dialogs():
+            count += 1
+        print(f"✅ Userbot {count} sohbeti hafızaya aldı. ARTIK KÖR DEĞİL!")
+    except Exception as e:
+        print(f"⚠️ Hafıza tazeleme uyarısı: {e}")
 
 # ==================== 🧠 KULLANICI & MUHASEBE ====================
 def get_user(user_id):
@@ -195,7 +207,7 @@ def send_invoice_via_http(chat_id, package_key):
         requests.post(url, data=payload)
     except: pass
 
-# ==================== 🏭 İŞÇİ (YENİLENMİŞ MOTOR) ====================
+# ==================== 🏭 İŞÇİ (DEEP SCAN) ====================
 download_queue = asyncio.PriorityQueue()
 
 async def worker():
@@ -206,7 +218,6 @@ async def worker():
         used_source = None
         
         try:
-            # 1. HAK KONTROLÜ
             allowed, reason = check_access(user_id)
             if not allowed:
                 btn = InlineKeyboardMarkup([
@@ -216,45 +227,48 @@ async def worker():
                 await status_msg.edit("⛔ **HAKKINIZ BİTTİ!**\n\nİndirme yapmak için bakiyeniz yetersiz.", reply_markup=btn)
                 continue
             
-            # 🔥 PEŞİN DÜŞ (RESERVE)
             used_source = reserve_credit(user_id)
             if not used_source:
                 await status_msg.edit("⛔ Teknik Hata: Bakiye düşülemedi.")
                 continue
 
-            # 2. LİNK AYIKLAMA (REGEX V2)
+            # 🔥 LINK ANALİZİ (V75 - KAPSAMLI)
             chat_id, msg_id = None, None
-            # Regex: (t.me/c/ID/MSG_ID) veya (t.me/user/MSG_ID)
-            match_private = re.search(r"(?:t\.me/c/|telegram\.me/c/)(\d+)/(\d+)", link)
-            match_public = re.search(r"(?:t\.me/|telegram\.me/)(?!c/)([\w\d_]+)/(\d+)", link)
-
-            if match_private:
-                chat_id = int("-100" + match_private.group(1))
-                msg_id = int(match_private.group(2))
-            elif match_public:
-                chat_id = match_public.group(1) # username
-                msg_id = int(match_public.group(2))
-            else:
-                refund_credit(user_id, used_source)
-                await status_msg.edit("❌ **GEÇERSİZ LİNK!**\nLütfen sadece Telegram mesaj linki gönderin.")
-                continue
-
-            # 🛠️ ERİŞİM KONTROLÜ (Resolve Peer)
+            # Temizle
+            clean_link = link.replace("https://", "").replace("http://", "").replace("t.me/", "").replace("telegram.me/", "").split("?")[0]
+            parts = clean_link.split("/")
+            
             try:
-                # Userbot'a "Git şu chat'i bul" diyoruz. Bulamazsa 400 hatası verir.
-                await userbot.get_chat(chat_id)
-            except Exception as e:
+                if parts[0] == "c": # Özel: c/123456/100
+                    chat_id = int("-100" + parts[1])
+                    msg_id = int(parts[2])
+                else: # Genel: username/100
+                    chat_id = parts[0]
+                    msg_id = int(parts[1])
+            except:
                 refund_credit(user_id, used_source)
-                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]])
-                await status_msg.edit("🚫 **ERİŞİM YOK!**\n\nBot bu kanalı göremiyor.\nLütfen kanalın **Davet Linkini** bota gönderin.", reply_markup=btn)
+                await status_msg.edit("❌ Link formatı hatalı.")
                 continue
 
+            # 🛠️ ERİŞİM DENEMESİ (PEER RESOLVE)
             target_msg = None
-            try: target_msg = await userbot.get_messages(chat_id, msg_id)
-            except Exception as e:
-                refund_credit(user_id, used_source)
-                await status_msg.edit(f"❌ Mesaj alınamadı: {e}")
-                continue
+            try:
+                # 1. Deneme: Direkt Erişim
+                target_msg = await userbot.get_messages(chat_id, msg_id)
+            except Exception as e1:
+                # 2. Deneme: Hafızayı Tazele ve Tekrar Dene
+                try:
+                    # Userbot'a "Git bu chat'i bul" diyoruz (Cache'e alıyor)
+                    if isinstance(chat_id, int): # ID ise
+                        try: await userbot.get_chat(chat_id)
+                        except: pass
+                    
+                    target_msg = await userbot.get_messages(chat_id, msg_id)
+                except Exception as e2:
+                    refund_credit(user_id, used_source)
+                    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]])
+                    await status_msg.edit(f"🚫 **İÇERİK ALINAMADI!**\n\nUserbot bu kanalda değil veya erişemiyor.\n\n`Hata: {e2}`", reply_markup=btn)
+                    continue
             
             if target_msg and (target_msg.video or target_msg.photo or target_msg.document):
                 file_size = 0
@@ -279,7 +293,6 @@ async def worker():
                 elif target_msg.photo: await client.send_photo(user_id, path, caption=caption)
                 elif target_msg.document: await client.send_document(user_id, path, caption=caption)
                 
-                # BAŞARILI - İADE YAPMA
                 u = get_user(user_id)
                 rem = u['balance'] if used_source == "Kredi" else (SUB_PACKS[u['sub_type']]['daily_limit'] - u['daily_usage'])
                 info = f"💰 Kalan Kredi: **{rem}**" if used_source == "Kredi" else f"📅 Günlük Hak: **{rem} Kaldı**"
@@ -338,7 +351,6 @@ async def menu_switcher(client, message, text, reply_markup=None):
 async def start(client, message):
     user_id = message.from_user.id
     u = get_user(user_id)
-    # Referans
     if len(message.command) > 1:
         try:
             ref_id = message.command[1]
@@ -354,7 +366,7 @@ async def start(client, message):
     txt, markup = main_menu(user_id)
     await menu_switcher(client, message, txt, markup)
 
-# 👑 ADMIN PANELİ (DÜZELTİLDİ)
+# 👑 ADMIN PANELİ
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
 async def admin_cmd(client, message):
     try:
@@ -493,7 +505,7 @@ async def cb_handler(client, callback):
         await callback.answer("✅ Fatura gönderildi!", show_alert=True)
 
     elif data == "acc":
-        txt, markup = main_menu(uid) # Profil zaten ana menüde
+        txt, markup = main_menu(uid)
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
 
     elif data == "ref":
@@ -546,10 +558,11 @@ async def main():
     print("🤖 Başlatılıyor...")
     await bot.start()
     await userbot.start()
+    await force_cache_refresh() # Userbot açılışta hafıza tazeler
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V74.0 MASTERPIECE ACTIVE")
+    print("✅ V75.0 DEEP MEMORY ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
