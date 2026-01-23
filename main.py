@@ -5,13 +5,12 @@ import asyncio
 import logging
 import datetime
 import requests
+import re
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserAlreadyParticipant, FloodWait
-
-# 🔥 HAM VERİ (Ödeme Onayı İçin)
 from pyrogram.raw.types import UpdateBotPrecheckoutQuery
 from pyrogram.raw.functions.messages import SetBotPrecheckoutResults
 
@@ -24,182 +23,159 @@ OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) 
 OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 
-# 🔥🔥🔥 BOT ADINI YAZ (BAŞINDA @ YOK) 🔥🔥🔥
+# 🔥 BOT KULLANICI ADI (BAŞINDA @ YOK)
 FIXED_BOT_USERNAME = "YaelSaverBot"
 
-# ==================== 💰 FİYATLANDIRMA ====================
-# 1️⃣ KREDİ PAKETLERİ (KULLANDIKÇA BİTER)
-CREDIT_PACKS = {
-    "c100":  {"name": "🥉 100 KREDİ",  "amount": 100,  "price_lbl": "100 ⭐", "price_amt": 100},
-    "c250":  {"name": "🥈 250 KREDİ",  "amount": 250,  "price_lbl": "250 ⭐", "price_amt": 250},
-    "c500":  {"name": "🥇 500 KREDİ",  "amount": 500,  "price_lbl": "500 ⭐", "price_amt": 500},
-    "c1000": {"name": "💎 1000 KREDİ", "amount": 1000, "price_lbl": "900 ⭐", "price_amt": 900}
+# 🔗 ABONELİK LİNKLERİ (MANUEL SATIŞ İÇİN)
+LINK_SUB_TRIAL = "https://t.me/yasin33"
+LINK_SUB_MID   = "https://t.me/yasin33"
+LINK_SUB_HIGH  = "https://t.me/yasin33"
+
+# ==================== 💰 VARSAYILAN FİYATLAR ====================
+# Bu değerler veritabanı boşsa kullanılır. Doluysa veritabanından çekilir.
+DEFAULT_CREDIT_PACKS = {
+    "c100":  {"name": "🥉 100 KREDİ",  "amount": 100,  "price_amt": 100},
+    "c250":  {"name": "🥈 250 KREDİ",  "amount": 250,  "price_amt": 250},
+    "c500":  {"name": "🥇 500 KREDİ",  "amount": 500,  "price_amt": 500},
+    "c1000": {"name": "💎 1000 KREDİ", "amount": 1000, "price_amt": 900}
 }
 
-# 2️⃣ ABONELİK PAKETLERİ (GÜNLÜK YENİLENİR)
+# Global değişken (Veritabanından güncellenecek)
+CREDIT_PACKS = DEFAULT_CREDIT_PACKS.copy()
+
 SUB_PACKS = {
-    "sub_trial": {"name": "⚡ DENEME (30 Gün)", "days": 30, "daily_limit": 5,  "price_lbl": "150 ⭐", "price_amt": 150},
-    "sub_mid":   {"name": "🔥 STANDART (30 Gün)", "days": 30, "daily_limit": 25, "price_lbl": "400 ⭐", "price_amt": 400},
-    "sub_high":  {"name": "👑 PRO (30 Gün)",    "days": 30, "daily_limit": 50, "price_lbl": "750 ⭐", "price_amt": 750}
+    "sub_trial": {"name": "⚡ DENEME (30 Gün)", "days": 30, "daily_limit": 5,  "desc": "Günde 5 Hak",  "link": LINK_SUB_TRIAL},
+    "sub_mid":   {"name": "🔥 STANDART (30 Gün)", "days": 30, "daily_limit": 25, "desc": "Günde 25 Hak", "link": LINK_SUB_MID},
+    "sub_high":  {"name": "👑 PRO (30 Gün)",    "days": 30, "daily_limit": 50, "desc": "Günde 50 Hak", "link": LINK_SUB_HIGH}
 }
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV57")
+logger = logging.getLogger("YaelV61")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V57.0 FIXED Active 🟢"
+def home(): return "Yael Saver V61.0 DYNAMIC PRICES Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
 bot = Client("sales_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 userbot = Client("sales_userbot", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING, in_memory=True)
 
-# ==================== 💾 VERİTABANI YÖNETİMİ (KAYA GİBİ SAĞLAM) ====================
-db_cache = {"users": {}}
+# ==================== 💾 VERİTABANI & KONFIGÜRASYON ====================
+db_cache = {"users": {}, "config": {"prices": DEFAULT_CREDIT_PACKS.copy()}}
 
 async def restore_data():
-    global db_cache
+    global db_cache, CREDIT_PACKS
     if LOG_CHANNEL == 0: return
-    print("📥 VERİLER YÜKLENİYOR...")
     try:
-        # Son 50 mesaja bak, en son atılan users.json'u bul
-        async for msg in bot.get_chat_history(LOG_CHANNEL, limit=50):
+        async for msg in bot.get_chat_history(LOG_CHANNEL, limit=20):
             if msg.document and msg.document.file_name == DB_FILE:
-                print(f"📥 Yedek bulundu: {msg.id}")
                 await bot.download_media(msg, file_name=DB_FILE)
                 with open(DB_FILE, "r") as f:
                     data = json.load(f)
-                    if "users" in data:
-                        db_cache = data
-                        print(f"✅ VERİLER KURTARILDI! {len(db_cache['users'])} kullanıcı yüklendi.")
-                        return
-    except Exception as e:
-        print(f"❌ Veri kurtarma hatası: {e}")
+                    if "users" in data: db_cache = data
+                    
+                    # 🔥 FİYATLARI GERİ YÜKLE
+                    if "config" in data and "prices" in data["config"]:
+                        CREDIT_PACKS = data["config"]["prices"]
+                        print("✅ Fiyatlar veritabanından güncellendi.")
+                    
+                print(f"✅ DATA YÜKLENDİ: {len(db_cache['users'])} kullanıcı.")
+                return
+    except: pass
 
 async def save_backup(reason="Otomatik"):
+    global db_cache, CREDIT_PACKS
     if LOG_CHANNEL == 0: return
     try:
+        # Fiyatları da kaydet
+        db_cache["config"] = {"prices": CREDIT_PACKS}
+        
         with open(DB_FILE, "w") as f: json.dump(db_cache, f, indent=4)
         total_users = len(db_cache.get("users", {}))
-        total_credits = sum(u.get("balance", 0) for u in db_cache["users"].values())
-        
         await bot.send_document(
             LOG_CHANNEL, 
             document=DB_FILE, 
-            caption=f"💾 **SİSTEM YEDEĞİ**\n📝 Sebep: {reason}\n⏰ Tarih: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}\n👥 Kullanıcı: {total_users}\n💰 Toplam Kredi: {total_credits}"
+            caption=f"💾 YEDEK ({reason})\n👥 {total_users} Üye\n💰 Fiyatlar Güncel"
         )
-        print(f"💾 Yedek alındı: {reason}")
-    except Exception as e:
-        print(f"❌ Yedek hatası: {e}")
+    except: pass
 
 async def backup_loop():
     while True:
-        await asyncio.sleep(1800) # 30 dakikada bir otomatik yedek
-        await save_backup(reason="Periyodik")
+        await asyncio.sleep(3600)
+        await save_backup(reason="Saatlik")
 
-# ==================== 🧠 KULLANICI & BAKİYE MANTIĞI ====================
+# ==================== 🧠 KULLANICI MANTIĞI ====================
 def get_user(user_id):
     uid = str(user_id)
     today = datetime.date.today().isoformat()
-    
-    # 🎁 YENİ KULLANICIYA 3 HAK
     if uid not in db_cache["users"]:
         db_cache["users"][uid] = {
-            "balance": 3,
-            "total_spent": 0,
-            "sub_type": "none",
-            "sub_expiry": 0,
-            "daily_usage": 0,
-            "last_reset": today,
-            "invited_by": None
+            "balance": 3, "total_spent": 0, "sub_type": "none", "sub_expiry": 0,
+            "daily_usage": 0, "last_reset": today, "invited_by": None
         }
-    
     user = db_cache["users"][uid]
-    
-    # Günlük Sıfırlama (Abonelik için)
     if user.get("last_reset") != today:
         user["daily_usage"] = 0
         user["last_reset"] = today
-        # Abonelik bitti mi?
         if user["sub_type"] != "none" and time.time() > user["sub_expiry"]:
             user["sub_type"] = "none"
             user["sub_expiry"] = 0
             try: bot.send_message(int(uid), "⚠️ **Aboneliğiniz Sona Erdi!**")
             except: pass
-            
     return user
 
-# YETKİ KONTROLÜ
 def check_access(user_id):
     if user_id == OWNER_ID: return True, "Patron"
     u = get_user(user_id)
-    
-    # 1. Abonelik Var mı?
     if u["sub_type"] != "none":
         pkg = SUB_PACKS.get(u["sub_type"])
-        if pkg and u["daily_usage"] < pkg["daily_limit"]:
-            return True, "Abonelik"
-    
-    # 2. Kredi Var mı?
-    if u["balance"] > 0:
-        return True, "Kredi"
-        
+        if pkg and u["daily_usage"] < pkg["daily_limit"]: return True, "Abonelik"
+    if u["balance"] > 0: return True, "Kredi"
     return False, "Yetersiz"
 
-# KREDİ DÜŞÜRME (ARTIK HATA YAPMAZ)
 def use_right(user_id):
     if user_id == OWNER_ID: return "Admin"
     uid = str(user_id)
     u = db_cache["users"][uid]
-    
-    # Abonelikten düş
     if u["sub_type"] != "none":
         pkg = SUB_PACKS.get(u["sub_type"])
         if pkg and u["daily_usage"] < pkg["daily_limit"]:
-            u["daily_usage"] += 1
-            return "Abonelik"
-            
-    # Krediden düş
+            u["daily_usage"] += 1; return "Abonelik"
     if u["balance"] > 0:
-        u["balance"] -= 1
-        u["total_spent"] += 1
-        return "Kredi"
-    
+        u["balance"] -= 1; u["total_spent"] += 1; return "Kredi"
     return "Hata"
 
-# KREDİ EKLEME
 def add_credits(user_id, amount):
     uid = str(user_id)
     get_user(uid)
     db_cache["users"][uid]["balance"] += amount
     return db_cache["users"][uid]["balance"]
 
-# ABONELİK VERME
 def activate_subscription(user_id, sub_key):
     uid = str(user_id)
     get_user(uid)
     pkg = SUB_PACKS[sub_key]
-    expiry = time.time() + (pkg["days"] * 86400)
     db_cache["users"][uid]["sub_type"] = sub_key
-    db_cache["users"][uid]["sub_expiry"] = expiry
+    db_cache["users"][uid]["sub_expiry"] = time.time() + (pkg["days"] * 86400)
     db_cache["users"][uid]["daily_usage"] = 0
     return pkg["name"]
 
-# ==================== 💳 FATURA (HTTP REQUEST) ====================
-def send_invoice_via_http(chat_id, payload_key, title, price_amount):
+# ==================== 💳 FATURA & FİYAT YÖNETİMİ ====================
+def send_invoice_via_http(chat_id, package_key):
     try:
+        pkg = CREDIT_PACKS[package_key]
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendInvoice"
         payload = {
             "chat_id": chat_id,
-            "title": title,
-            "description": "Otomatik Teslimat | Anında Yükleme",
-            "payload": payload_key,
-            "provider_token": "", # Stars için boş
+            "title": pkg["name"],
+            "description": f"{pkg['amount']} Adet İndirme Kredisi (Süresiz)",
+            "payload": f"cred_{package_key}",
+            "provider_token": "", 
             "currency": "XTR",
-            "prices": json.dumps([{"label": title, "amount": price_amount}])
+            "prices": json.dumps([{"label": pkg["name"], "amount": pkg["price_amt"]}])
         }
         requests.post(url, data=payload)
     except: pass
@@ -213,23 +189,31 @@ async def worker():
         priority, task = await download_queue.get()
         client, status_msg, link, user_id = task
         try:
-            # 🛑 SON DAKİKA BAKİYE KONTROLÜ
             allowed, reason = check_access(user_id)
             if not allowed:
-                await status_msg.edit("⛔ **YETERSİZ BAKİYE!**\nİşlem iptal edildi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Mağaza", callback_data="shop_home")]]))
+                await status_msg.edit("⛔ **LİMİT DOLDU!**\nKredi veya abonelik alın.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Mağaza", callback_data="shop_home")]]))
                 continue
 
             chat_id, msg_id = None, None
-            if "t.me/c/" in link:
-                parts = link.split("t.me/c/")[1].split("/")
-                chat_id = int("-100" + parts[0]); msg_id = int(parts[1].split("?")[0])
+            private_match = re.search(r"t\.me/c/(\d+)/(\d+)", link)
+            public_match = re.search(r"t\.me/([\w\d_]+)/(\d+)", link)
+
+            if private_match:
+                chat_id = int("-100" + private_match.group(1))
+                msg_id = int(private_match.group(2))
+            elif public_match:
+                username = public_match.group(1)
+                msg_id = int(public_match.group(2))
+                if username == "c": continue
+                chat_id = username
             else:
-                parts = link.split("t.me/")[1].split("/"); chat_id = parts[0]; msg_id = int(parts[1].split("?")[0])
-            
+                await status_msg.edit("❌ Link Hatalı!")
+                continue
+
             target_msg = None
             try: target_msg = await userbot.get_messages(chat_id, msg_id)
-            except:
-                await status_msg.edit("🚫 **ERİŞİM YOK!**\nBotun kanalda olduğundan emin olun veya davet linkini gönderin.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+            except Exception as e:
+                await status_msg.edit(f"🚫 **ERİŞİM YOK!**\nKanalın **Davet Linkini** bota gönderin.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
                 continue
                 
             if target_msg and (target_msg.video or target_msg.photo or target_msg.document):
@@ -238,14 +222,12 @@ async def worker():
                 await status_msg.edit("⬆️ **Yükleniyor...**")
                 
                 caption = f"📥 **İndirildi:** @{FIXED_BOT_USERNAME}\n🔓 **Premium İndirici**"
-                if target_msg.video: await client.send_video(user_id, path, caption=caption, width=target_msg.video.width, height=target_msg.video.height)
+                if target_msg.video: await client.send_video(user_id, path, caption=caption)
                 elif target_msg.photo: await client.send_photo(user_id, path, caption=caption)
                 elif target_msg.document: await client.send_document(user_id, path, caption=caption)
                 
-                # 🔥 HAKKI BURADA DÜŞÜRÜYORUZ (KESİN ÇÖZÜM)
                 src = use_right(user_id)
                 u = get_user(user_id)
-                
                 info = ""
                 if src == "Abonelik":
                     rem = SUB_PACKS[u["sub_type"]]["daily_limit"] - u["daily_usage"]
@@ -255,10 +237,8 @@ async def worker():
                 
                 await status_msg.edit(f"✅ **Tamamlandı!**\n{info}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
                 if os.path.exists(path): os.remove(path)
-                
-                # Her indirmede yedeği güncelle (Veri kaybına son)
-                asyncio.create_task(save_backup("Otomatik-İndirme"))
-            else: await status_msg.edit("❌ Medya bulunamadı.")
+                if u.get("total_spent", 0) % 5 == 0: asyncio.create_task(save_backup("Otomatik"))
+            else: await status_msg.edit("❌ Medya yok.")
         except Exception as e:
             try: await status_msg.edit(f"❌ Hata: {e}")
             except: pass
@@ -268,17 +248,16 @@ async def worker():
 # ==================== ⚡ MENÜLER ====================
 def main_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📥 İçerik İndir", callback_data="dl"), InlineKeyboardButton("💰 Hesabım", callback_data="acc")],
-        [InlineKeyboardButton("💎 MAĞAZA (Kredi & Abone)", callback_data="shop_home")],
+        [InlineKeyboardButton("📥 Link İndir", callback_data="dl"), InlineKeyboardButton("💰 Hesabım", callback_data="acc")],
+        [InlineKeyboardButton("💎 MAĞAZA", callback_data="shop_home")],
         [InlineKeyboardButton("❓ Yardım", callback_data="howto"), InlineKeyboardButton("👥 Referans", callback_data="ref")],
-        [InlineKeyboardButton("👨‍💻 Admin & Destek", callback_data="service")]
+        [InlineKeyboardButton("👨‍💻 Destek", callback_data="service")]
     ])
 
 def shop_home_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 KREDİ PAKETLERİ (Süresiz)", callback_data="shop_credits")],
-        [InlineKeyboardButton("📅 AYLIK ABONELİK (Günlük Yenilenir)", callback_data="shop_subs")],
-        [InlineKeyboardButton("💳 IBAN / Havale ile Al", callback_data="shop_iban")],
+        [InlineKeyboardButton("💰 KREDİ PAKETLERİ", callback_data="shop_credits")],
+        [InlineKeyboardButton("📅 AYLIK ABONELİK", callback_data="shop_subs")],
         [InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]
     ])
 
@@ -305,36 +284,74 @@ async def start(client, message):
                         try: await client.send_message(int(ref_id), "🎉 **Referans!** +2 Kredi kazandın.")
                         except: pass
         except: pass
-    await menu_switcher(client, message, f"👋 **Merhaba {message.from_user.first_name}!**\n\nTelegram'ın en hızlı indiricisine hoş geldin.\n🎁 **Hediye:** 3 Kredi tanımlandı.\n\n👇 **Menü:**", main_menu())
+    await menu_switcher(client, message, f"👋 **Merhaba {message.from_user.first_name}!**\n\nTelegram'ın en hızlı indiricisine hoş geldin.\n🎁 **Hediye:** 3 Kredi Tanımlandı.\n\n👇 **Menü:**", main_menu())
 
-# 👑 ADMIN PANELİ (DÜZELTİLDİ)
+# 👑 ADMIN & FİYAT YÖNETİMİ
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
 async def admin_cmd(client, message):
+    tot = len(db_cache["users"])
     btns = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💰 Fiyat Listesi", callback_data="admin_prices"), InlineKeyboardButton("🏷️ İndirim Yap", callback_data="admin_discount_info")],
         [InlineKeyboardButton("➕ Kredi Ver", callback_data="admin_addc"), InlineKeyboardButton("➕ Abone Yap", callback_data="admin_adds")],
         [InlineKeyboardButton("📢 Duyuru", callback_data="admin_cast"), InlineKeyboardButton("📊 İstatistik", callback_data="admin_stats")],
         [InlineKeyboardButton("💾 Yedek Al", callback_data="admin_backup"), InlineKeyboardButton("🔙 Çıkış", callback_data="back_home")]
     ])
-    await menu_switcher(client, message, "👑 **YÖNETİCİ PANELİ**", btns)
+    await menu_switcher(client, message, f"👑 **YÖNETİCİ PANELİ**\n\nAktif Kullanıcı: {tot}", btns)
+
+@bot.on_message(filters.command("setprice") & filters.user(OWNER_ID))
+async def set_price(c, m):
+    # Kullanım: /setprice c100 80
+    try:
+        code = m.command[1]
+        price = int(m.command[2])
+        if code in CREDIT_PACKS:
+            CREDIT_PACKS[code]["price_amt"] = price
+            CREDIT_PACKS[code]["price_lbl"] = f"{price} ⭐"
+            await m.reply(f"✅ **Güncellendi:** {code} -> {price} ⭐")
+            await save_backup("Fiyat Güncelleme")
+        else: await m.reply("❌ Paket kodu geçersiz (c100, c250...)")
+    except: await m.reply("❌ `/setprice [KOD] [YENİ_FİYAT]`")
+
+@bot.on_message(filters.command("discount") & filters.user(OWNER_ID))
+async def discount_cmd(c, m):
+    # Kullanım: /discount 20 (%20 indirim yapar)
+    # Sıfırlamak için: /discount 0 (Varsayılan fiyatlara döner)
+    try:
+        percent = int(m.command[1])
+        if percent == 0:
+            # Sıfırla
+            global CREDIT_PACKS
+            CREDIT_PACKS = DEFAULT_CREDIT_PACKS.copy()
+            await m.reply("✅ İndirimler kaldırıldı, fiyatlar sıfırlandı.")
+        else:
+            # İndirim Uygula
+            for k, v in CREDIT_PACKS.items():
+                original = DEFAULT_CREDIT_PACKS[k]["price_amt"]
+                new_price = int(original - (original * percent / 100))
+                CREDIT_PACKS[k]["price_amt"] = new_price
+                CREDIT_PACKS[k]["price_lbl"] = f"{new_price} ⭐ (⬇️%{percent})"
+            await m.reply(f"✅ Tüm paketlere **%{percent}** indirim uygulandı!")
+        await save_backup("İndirim Ayarı")
+    except: await m.reply("❌ `/discount [YÜZDE]` (Örn: `/discount 20` veya `/discount 0`)")
 
 @bot.on_message(filters.command("addcredit") & filters.user(OWNER_ID))
 async def manual_c(c, m):
     try:
         t, a = int(m.command[1]), int(m.command[2])
         add_credits(t, a)
-        await m.reply(f"✅ `{t}` kullanıcısına `{a}` kredi eklendi.")
-        await save_backup("Admin Kredi")
-    except: await m.reply("❌ Kullanım: `/addcredit ID MİKTAR`")
+        await m.reply(f"✅ `{t}` -> `{a}` kredi.")
+        await save_backup("Manuel")
+    except: await m.reply("❌ `/addcredit ID MİKTAR`")
 
 @bot.on_message(filters.command("setsub") & filters.user(OWNER_ID))
 async def manual_s(c, m):
     try:
         t, p = int(m.command[1]), m.command[2]
-        if p not in SUB_PACKS: return await m.reply(f"❌ Paketler: {', '.join(SUB_PACKS.keys())}")
+        if p not in SUB_PACKS: return await m.reply("❌ Paket yok!")
         activate_subscription(t, p)
-        await m.reply(f"✅ `{t}` kullanıcısına `{p}` tanımlandı.")
-        await save_backup("Admin Sub")
-    except: await m.reply("❌ Kullanım: `/setsub ID PAKET_KODU`")
+        await m.reply(f"✅ `{t}` -> `{p}`.")
+        await save_backup("Manuel")
+    except: await m.reply("❌ `/setsub ID PAKET`")
 
 @bot.on_message(filters.command("duyuru") & filters.user(OWNER_ID))
 async def broad(c, m):
@@ -353,8 +370,7 @@ async def dl_link(client, message):
     user_id = message.from_user.id
     allowed, reason = check_access(user_id)
     if not allowed:
-        return await message.reply("⛔ **BAKİYENİZ YETERSİZ!**\n\nİndirme yapmak için Mağaza'dan yükleme yapın.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Mağaza", callback_data="shop_home")]]))
-    
+        return await message.reply("⛔ **HAKKINIZ BİTTİ!**\nDevam etmek için mağazadan satın alım yapın.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Mağaza", callback_data="shop_home")]]))
     st = await message.reply(f"⏳ **Sıraya Alındı...**")
     u = get_user(user_id)
     prio = 1 if u["sub_type"] != "none" else 2
@@ -369,10 +385,10 @@ async def cb_handler(client, callback):
     u = get_user(uid)
     
     if data == "back_home": await menu_switcher(client, callback.message, f"👋 **Ana Menü**", main_menu())
-    elif data == "shop_home": await menu_switcher(client, callback.message, "🛒 **MAĞAZA**\n\nLütfen bir kategori seçiniz:", shop_home_menu())
+    elif data == "shop_home": await menu_switcher(client, callback.message, "🛒 **MAĞAZA**\nLütfen bir kategori seçiniz:", shop_home_menu())
     
     elif data == "shop_credits":
-        txt = "💰 **KREDİ PAKETLERİ (Süresiz)**\nKullandıkça düşer.\n\n"
+        txt = "💰 **KREDİ PAKETLERİ (OTOMATİK)**\nSatın al'a basınca fatura çıkar.\n\n"
         btns = []
         for k, v in CREDIT_PACKS.items():
             txt += f"🔸 **{v['name']}** -> {v['price_lbl']}\n"
@@ -381,41 +397,25 @@ async def cb_handler(client, callback):
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup(btns))
         
     elif data == "shop_subs":
-        txt = "📅 **AYLIK ABONELİKLER**\nHer gün haklarınız yenilenir.\n\n"
+        txt = "📅 **AYLIK ABONELİKLER (MANUEL)**\nSatın almak için butona tıklayın, yönlendirileceksiniz.\n\n"
         btns = []
         for k, v in SUB_PACKS.items():
-            txt += f"🔹 **{v['name']}** -> {v['price_lbl']}\n"
-            btns.append([InlineKeyboardButton(f"Abone Ol: {v['price_lbl']}", callback_data=f"buy_s_{k}")])
+            txt += f"🔹 **{v['name']}**\n   └ {v['desc']} -> {v['price_lbl']}\n"
+            btns.append([InlineKeyboardButton(f"SATIN AL ({v['name']})", url=v['link'])])
         btns.append([InlineKeyboardButton("🔙 Geri", callback_data="shop_home")])
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup(btns))
-        
-    elif data == "shop_iban":
-        txt = f"💳 **IBAN / HAVALE İLE ÖDEME**\n\nTelegram Yıldızı kullanmıyorsanız, IBAN ile ödeme yapıp paket tanımlatabilirsiniz.\n\n👤 **İletişim:** @{OWNER_USERNAME}"
-        await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("💬 Admine Yaz", url=f"https://t.me/{OWNER_USERNAME}"), InlineKeyboardButton("🔙 Geri", callback_data="shop_home")]]))
 
     elif data.startswith("buy_c_"):
         key = data.split("_")[2]
-        pkg = CREDIT_PACKS[key]
-        send_invoice_via_http(uid, f"cred_{key}", pkg["name"], pkg["price_amt"])
-        await callback.answer("✅ Fatura Gönderildi!", show_alert=True)
-        
-    elif data.startswith("buy_s_"):
-        key = data.split("_")[2]
-        pkg = SUB_PACKS[key]
-        send_invoice_via_http(uid, f"subs_{key}", pkg["name"], pkg["price_amt"])
-        await callback.answer("✅ Fatura Gönderildi!", show_alert=True)
+        send_invoice_via_http(uid, key)
+        await callback.answer("✅ Fatura gönderildi!", show_alert=True)
 
     elif data == "acc":
         sub_txt = "Yok"
         if u["sub_type"] != "none":
             days = int((u["sub_expiry"] - time.time()) / 86400)
-            limit = SUB_PACKS[u["sub_type"]]["daily_limit"]
-            sub_txt = f"{SUB_PACKS[u['sub_type']]['name']}\n⏳ {days} Gün Kaldı\n📉 Bugün: {limit - u['daily_usage']} Hak"
-        
-        txt = (f"👤 **PROFİLİM**\n\n"
-               f"💰 **Kredi:** {u['balance']}\n"
-               f"📅 **Abonelik:** {sub_txt}\n\n"
-               f"📉 Toplam İndirme: {u.get('total_spent', 0)}")
+            sub_txt = f"{SUB_PACKS[u['sub_type']]['name']} ({days} Gün)"
+        txt = (f"👤 **PROFİLİM**\n\n💰 **Kredi:** {u['balance']}\n📅 **Abonelik:** {sub_txt}\n📉 İndirme: {u.get('total_spent', 0)}")
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
 
     elif data == "ref":
@@ -423,19 +423,27 @@ async def cb_handler(client, callback):
         txt = f"👥 **REFERANS**\nArkadaşını davet et, **+2 Kredi** kazan!\n\n🔗 `{link}`"
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=f"https://t.me/share/url?url={link}"), InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
     
-    # 👑 ADMIN FONKSİYONLARI (ARTIK ÇALIŞIYOR)
+    # 👑 ADMIN FONKSİYONLARI
     elif data == "admin_stats":
-        t = len(db_cache["users"])
-        c = sum(x["balance"] for x in db_cache["users"].values())
-        s = sum(1 for x in db_cache["users"].values() if x["sub_type"] != "none")
-        await menu_switcher(client, callback.message, f"📊 **İSTATİSTİK**\n\n👤 Toplam Üye: **{t}**\n💰 Dolaşan Kredi: **{c}**\n📅 Aktif Abone: **{s}**", admin_menu())
+        t = str(len(db_cache.get("users", {})))
+        c = str(sum(x.get("balance", 0) for x in db_cache["users"].values()))
+        s = str(sum(1 for x in db_cache["users"].values() if x.get("sub_type") != "none"))
+        await menu_switcher(client, callback.message, f"📊 **İSTATİSTİKLER**\n\n👤 Üye Sayısı: **{t}**\n💰 Toplam Kredi: **{c}**\n📅 Aktif Abone: **{s}**", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
     elif data == "admin_backup":
         await save_backup("Manuel")
         await callback.answer("✅ Yedek Kanalına Gönderildi!", show_alert=True)
-    elif data == "admin_addc": await client.send_message(uid, "ℹ️ Komut: `/addcredit ID MİKTAR`")
-    elif data == "admin_adds": await client.send_message(uid, "ℹ️ Komut: `/setsub ID sub_trial`\nPaketler: sub_trial, sub_mid, sub_high")
-    elif data == "admin_cast": await client.send_message(uid, "ℹ️ Komut: `/duyuru MESAJ`")
-    elif data == "howto": await menu_switcher(client, callback.message, "❓ **YARDIM**\n\nLinki bota atın, indirsin.\nBot kanalda değilse 'Erişim Yok' der, o zaman davet linkini atın.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+    elif data == "admin_prices":
+        txt = "💰 **MEVCUT FİYATLAR**\n\n"
+        for k, v in CREDIT_PACKS.items(): txt += f"🔹 `{k}`: {v['price_lbl']}\n"
+        txt += "\n🛠 **Değiştirmek İçin:**\n`/setprice c100 80`"
+        await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+    elif data == "admin_discount_info":
+        await client.send_message(uid, "ℹ️ **İNDİRİM KOMUTU**\n`/discount 20` -> %20 İndirim Yapar\n`/discount 0` -> İndirimi Kaldırır")
+    elif data == "admin_addc": await client.send_message(uid, "ℹ️ `/addcredit ID MİKTAR`")
+    elif data == "admin_adds": await client.send_message(uid, "ℹ️ `/setsub ID sub_trial`")
+    elif data == "admin_cast": await client.send_message(uid, "ℹ️ `/duyuru MESAJ`")
+    
+    elif data == "howto": await menu_switcher(client, callback.message, "❓ **YARDIM**\n\n1️⃣ İçerik linkini bota at.\n2️⃣ Bot indirip sana yollasın.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
     elif data == "service": await menu_switcher(client, callback.message, f"👨‍💻 **DESTEK**\n\n@{OWNER_USERNAME}", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
     elif data == "dl": await menu_switcher(client, callback.message, "📂 **İndirme Modu**\nLink gönderin.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
 
@@ -460,14 +468,6 @@ async def success(c, m):
             await m.reply(f"🎉 **BAŞARILI!**\n💰 +{pkg['amount']} Kredi yüklendi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 Cüzdan", callback_data="acc")]]))
             try: await c.send_message(OWNER_ID, f"💰 SATIŞ: {pkg['name']}")
             except: pass
-    elif pl.startswith("subs_"):
-        key = pl.replace("subs_", "")
-        pkg = SUB_PACKS.get(key)
-        if pkg:
-            activate_subscription(m.from_user.id, key)
-            await m.reply(f"🎉 **BAŞARILI!**\n📅 {pkg['name']} tanımlandı.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👤 Profil", callback_data="acc")]]))
-            try: await c.send_message(OWNER_ID, f"📅 SATIŞ: {pkg['name']}")
-            except: pass
     await save_backup("Satış")
 
 # ==================== BAŞLATMA ====================
@@ -478,7 +478,7 @@ async def main():
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V57.0 FIXED FINAL ACTIVE")
+    print("✅ V61.0 DYNAMIC ADMIN ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
