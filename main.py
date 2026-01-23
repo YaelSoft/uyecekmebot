@@ -5,11 +5,10 @@ import asyncio
 import logging
 import datetime
 import requests
-import re
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import PeerIdInvalid, ChannelInvalid, ChannelPrivate, UserAlreadyParticipant, FloodWait
 from pyrogram.raw.types import UpdateBotPrecheckoutQuery
 from pyrogram.raw.functions.messages import SetBotPrecheckoutResults
@@ -29,39 +28,35 @@ FIXED_BOT_USERNAME = "YaelSaverBot"
 # 🔗 ABONELİK LİNKLERİ (GRUP GİRİŞLERİ)
 LINK_SUB_TRIAL = "https://t.me/+CqcEl_4PUgE1YWFh" # 200 Yıldızlık Grup
 LINK_SUB_MID   = "https://t.me/+AxzfBTfLlHVlNWQx" # 750 Yıldızlık Grup
-LINK_SUB_HIGH  = "https://t.me/+TM943UrHw-QxNzgx" # 1250 Yıldızlık Grup
+LINK_SUB_HIGH  = "https://t.me/+TM943UrHw-QxNzgx" # 1250 Yıldızlık Grup 
 
-# ==================== 💰 YENİ TİCARİ DENGE FİYATLARI ====================
+# ==================== 💰 FİYATLAR & LİMİTLER ====================
 
-# 1️⃣ KREDİ PAKETLERİ (OTOMATİK - ZAMLI)
-# Müşteriyi aboneliğe itmek için kredi fiyatlarını artırdık.
 DEFAULT_CREDIT_PACKS = {
-    "c100":  {"name": "🥉 100 KREDİ",  "amount": 100,  "price_amt": 150},  # ~75 TL (Dengeleyici Fiyat)
+    "c100":  {"name": "🥉 100 KREDİ",  "amount": 100,  "price_amt": 150},
     "c250":  {"name": "🥈 250 KREDİ",  "amount": 250,  "price_amt": 350},
     "c500":  {"name": "🥇 500 KREDİ",  "amount": 500,  "price_amt": 650},
     "c1000": {"name": "💎 1000 KREDİ", "amount": 1000, "price_amt": 1200}
 }
 CREDIT_PACKS = DEFAULT_CREDIT_PACKS.copy()
 
-# 2️⃣ ABONELİK PAKETLERİ (MANUEL - CAZİP)
 SUB_PACKS = {
     "sub_trial": {"name": "⚡ BRONZ (30 Gün)",   "days": 30, "daily_limit": 5,  "desc": "Günde 5 Hak",  "price_lbl": "200 ⭐",  "link": LINK_SUB_TRIAL},
     "sub_mid":   {"name": "🔥 GÜMÜŞ (30 Gün)",   "days": 30, "daily_limit": 25, "desc": "Günde 25 Hak", "price_lbl": "750 ⭐",  "link": LINK_SUB_MID},
     "sub_high":  {"name": "👑 ALTIN (30 Gün)",    "days": 30, "daily_limit": 50, "desc": "Günde 50 Hak", "price_lbl": "1250 ⭐", "link": LINK_SUB_HIGH}
 }
 
-# 🛡️ LİMİTLER
-LIMIT_FREE = 50 * 1024 * 1024    # 50 MB
-LIMIT_VIP  = 500 * 1024 * 1024   # 500 MB
+LIMIT_FREE = 50 * 1024 * 1024    
+LIMIT_VIP  = 500 * 1024 * 1024   
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV70")
+logger = logging.getLogger("YaelV71")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V70.0 COMMERCIAL BALANCE Active 🟢"
+def home(): return "Yael Saver V71.0 BLIND FIX Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -133,7 +128,6 @@ def check_access(user_id):
     if u["balance"] > 0: return True, "Kredi"
     return False, "Yetersiz"
 
-# KOTA KONTROLÜ
 def get_size_limit(user_id):
     if user_id == OWNER_ID: return 100 * 1024 * 1024 * 1024
     u = get_user(user_id)
@@ -170,7 +164,6 @@ def activate_subscription(user_id, sub_key):
     db_cache["users"][uid]["daily_usage"] = 0
     return pkg["name"]
 
-# ==================== 💳 FATURA (OTOMATİK) ====================
 def send_invoice_via_http(chat_id, package_key):
     try:
         pkg = CREDIT_PACKS[package_key]
@@ -188,7 +181,7 @@ def send_invoice_via_http(chat_id, package_key):
         requests.post(url, data=payload)
     except: pass
 
-# ==================== 🏭 İŞÇİ ====================
+# ==================== 🏭 İŞÇİ (CERRAH GÖZLÜ) ====================
 download_queue = asyncio.PriorityQueue()
 
 async def worker():
@@ -202,26 +195,51 @@ async def worker():
                 await status_msg.edit("⛔ **LİMİT DOLDU!**\nKredi veya abonelik alın.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Mağaza", callback_data="shop_home")]]))
                 continue
 
-            chat_id, msg_id = None, None
-            private_match = re.search(r"t\.me/c/(\d+)/(\d+)", link)
-            public_match = re.search(r"t\.me/([\w\d_]+)/(\d+)", link)
+            # 🔥🔥🔥 GELİŞMİŞ LİNK ANALİZİ (PARÇALA VE YÖNET) 🔥🔥🔥
+            chat_id = None
+            msg_id = None
+            
+            clean_link = link.split("?")[0] # Query parametrelerini temizle (single vb.)
+            parts = clean_link.split("/")
+            
+            try:
+                # Durum 1: Özel Kanal (t.me/c/123456/100)
+                if "t.me/c/" in clean_link:
+                    # ID'yi al (t.me, c, ID, MSG_ID)
+                    chat_id_raw = parts[-2]
+                    msg_id_raw = parts[-1]
+                    chat_id = int("-100" + str(chat_id_raw)) # -100 ekle
+                    msg_id = int(msg_id_raw)
+                
+                # Durum 2: Genel Kanal (t.me/username/100)
+                elif "t.me/" in clean_link:
+                    chat_id = parts[-2] # Username
+                    msg_id = int(parts[-1])
+                
+                else:
+                    raise Exception("Geçersiz Link Formatı")
 
-            if private_match:
-                chat_id = int("-100" + private_match.group(1))
-                msg_id = int(private_match.group(2))
-            elif public_match:
-                username = public_match.group(1)
-                msg_id = int(public_match.group(2))
-                if username == "c": continue
-                chat_id = username
-            else:
-                await status_msg.edit("❌ Link Hatalı!")
+            except:
+                await status_msg.edit("❌ Link formatı anlaşılamadı.")
                 continue
 
-            target_msg = None
-            try: target_msg = await userbot.get_messages(chat_id, msg_id)
+            # 🛠️ ZORLA TANIŞTIRMA (CACHE REFRESH)
+            # Userbot'un kanalı tanıması için önce bir get_chat denemesi yapıyoruz.
+            try:
+                await userbot.get_chat(chat_id)
             except Exception as e:
-                await status_msg.edit(f"🚫 **ERİŞİM YOK!**\nKanalın **Davet Linkini** bota gönderin.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+                # Erişim yoksa veya banlıysa
+                print(f"Chat Error: {e}")
+                txt = "🚫 **ERİŞİM YOK!**\n\nBot bu kanala ulaşamıyor. Sebepler:\n1. Userbot kanalda değil.\n2. Userbot kanaldan banlanmış.\n\nLütfen kanalın **Davet Linkini** bota atın."
+                await status_msg.edit(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+                continue
+
+            # 📥 ARTIK İNDİRMEK ZORUNDA
+            target_msg = None
+            try: 
+                target_msg = await userbot.get_messages(chat_id, msg_id)
+            except Exception as e:
+                await status_msg.edit(f"❌ Mesaj alınamadı: {e}")
                 continue
                 
             if target_msg and (target_msg.video or target_msg.photo or target_msg.document):
@@ -232,6 +250,7 @@ async def worker():
                 
                 user_limit = get_size_limit(user_id)
                 if file_size > user_limit:
+                    limit_mb = int(user_limit / 1024 / 1024)
                     is_vip = (user_limit == LIMIT_VIP)
                     if not is_vip:
                         msg_txt = f"⚠️ **LİMİT (50 MB)**\n\nBu dosya ücretsiz limitin üzerindedir.\n🚀 **500 MB** indirmek için Premium alın."
@@ -263,7 +282,7 @@ async def worker():
                 await status_msg.edit(f"✅ **Tamamlandı!**\n{info}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
                 if os.path.exists(path): os.remove(path)
                 if u.get("total_spent", 0) % 5 == 0: asyncio.create_task(save_backup("Otomatik"))
-            else: await status_msg.edit("❌ Medya yok.")
+            else: await status_msg.edit("❌ Mesajda indirilecek medya yok.")
         except Exception as e:
             try: await status_msg.edit(f"❌ Hata: {e}")
             except: pass
@@ -497,7 +516,7 @@ async def main():
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V70.0 COMMERCIAL BALANCE ACTIVE")
+    print("✅ V71.0 BLIND FIX ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
