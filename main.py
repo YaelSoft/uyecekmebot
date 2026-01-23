@@ -27,9 +27,9 @@ OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 FIXED_BOT_USERNAME = "YaelSaverBot"
 
 # 🔗 ABONELİK LİNKLERİ (GRUP GİRİŞLERİ)
- LINK_SUB_TRIAL = "https://t.me/+CqcEl_4PUgE1YWFh" # 200 Yıldızlık Grup
- LINK_SUB_MID   = "https://t.me/+AxzfBTfLlHVlNWQx" # 750 Yıldızlık Grup
- LINK_SUB_HIGH  = "https://t.me/+TM943UrHw-QxNzgx" # 1250 Yıldızlık Grup 
+LINK_SUB_TRIAL = "https://t.me/+CqcEl_4PUgE1YWFh" # 200 Yıldızlık Grup
+LINK_SUB_MID   = "https://t.me/+AxzfBTfLlHVlNWQx" # 750 Yıldızlık Grup
+LINK_SUB_HIGH  = "https://t.me/+TM943UrHw-QxNzgx" # 1250 Yıldızlık Grup 
 
 # ==================== 💰 FİYATLAR & LİMİTLER ====================
 
@@ -529,3 +529,4 @@ if __name__ == '__main__':
     Thread(target=run_web).start()
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
+
