@@ -26,10 +26,10 @@ OWNER_USERNAME = os.environ.get("OWNER_USERNAME", "yasin33")
 # 🔥 BOT KULLANICI ADI (BAŞINDA @ YOK)
 FIXED_BOT_USERNAME = "YaelSaverBot"
 
-# 🔗 ABONELİK LİNKLERİ
-LINK_SUB_TRIAL = "https://t.me/+AbCdEfGhIjK..." 
-LINK_SUB_MID   = "https://t.me/+AbCdEfGhIjK..." 
-LINK_SUB_HIGH  = "https://t.me/+AbCdEfGhIjK..." 
+# 🔗 ABONELİK LİNKLERİ (GRUP GİRİŞLERİ)
+LINK_SUB_TRIAL = "https://t.me/+CqcEl_4PUgE1YWFh" # 200 Yıldızlık Grup
+LINK_SUB_MID   = "https://t.me/+AxzfBTfLlHVlNWQx" # 750 Yıldızlık Grup
+LINK_SUB_HIGH  = "https://t.me/+TM943UrHw-QxNzgx" # 1250 Yıldızlık Grup
 
 # ==================== 💰 FİYATLAR & LİMİTLER ====================
 
@@ -52,12 +52,12 @@ LIMIT_VIP  = 500 * 1024 * 1024
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV73")
+logger = logging.getLogger("YaelV74")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V73.0 SOLID ACCOUNTING Active 🟢"
+def home(): return "Yael Saver V74.0 MASTERPIECE Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -100,13 +100,6 @@ async def backup_loop():
         await asyncio.sleep(3600)
         await save_backup(reason="Saatlik")
 
-async def refresh_userbot_cache():
-    print("🔄 Userbot hafızası tazeleniyor...")
-    try:
-        async for dialog in userbot.get_dialogs(limit=500): pass
-        print(f"✅ Userbot hazır.")
-    except: pass
-
 # ==================== 🧠 KULLANICI & MUHASEBE ====================
 def get_user(user_id):
     uid = str(user_id)
@@ -125,8 +118,6 @@ def get_user(user_id):
             user["sub_expiry"] = 0
             try: bot.send_message(int(uid), "⚠️ **Aboneliğiniz Sona Erdi!**")
             except: pass
-    
-    # 🔥 GÜVENLİK DUVARI: EKSİ BAKİYEYİ SIFIRLA
     if user["balance"] < 0: user["balance"] = 0
     return user
 
@@ -139,28 +130,23 @@ def check_access(user_id):
     if u["balance"] > 0: return True, "Kredi"
     return False, "Yetersiz"
 
-# 🔥 PEŞİN ÖDEME SİSTEMİ
+# PEŞİN ALIM
 def reserve_credit(user_id):
     if user_id == OWNER_ID: return "Admin"
     uid = str(user_id)
     u = db_cache["users"][uid]
-    
-    # Önce Abonelikten Düş
     if u["sub_type"] != "none":
         pkg = SUB_PACKS.get(u["sub_type"])
         if pkg and u["daily_usage"] < pkg["daily_limit"]:
             u["daily_usage"] += 1
             return "Abonelik"
-    
-    # Yoksa Krediden Düş (Peşin)
     if u["balance"] > 0:
         u["balance"] -= 1
         u["total_spent"] += 1
         return "Kredi"
-    
-    return False # Bakiye yok
+    return False
 
-# 🔥 İADE SİSTEMİ (İşlem başarısız olursa)
+# İADE
 def refund_credit(user_id, source):
     if user_id == OWNER_ID: return
     uid = str(user_id)
@@ -209,7 +195,7 @@ def send_invoice_via_http(chat_id, package_key):
         requests.post(url, data=payload)
     except: pass
 
-# ==================== 🏭 İŞÇİ ====================
+# ==================== 🏭 İŞÇİ (YENİLENMİŞ MOTOR) ====================
 download_queue = asyncio.PriorityQueue()
 
 async def worker():
@@ -217,56 +203,60 @@ async def worker():
     while True:
         priority, task = await download_queue.get()
         client, status_msg, link, user_id = task
-        used_source = None # Kayıt tutuyoruz
+        used_source = None
         
         try:
-            # 1. HAK KONTROLÜ VE PEŞİN DÜŞME
+            # 1. HAK KONTROLÜ
             allowed, reason = check_access(user_id)
             if not allowed:
-                # 🛑 KREDİ BİTTİ UYARISI
                 btn = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("👥 Referans Kas (+Bedava)", callback_data="ref")],
-                    [InlineKeyboardButton("💎 Kredi / VIP Al", callback_data="shop_home")]
+                    [InlineKeyboardButton("💎 MAĞAZAYA GİT", callback_data="shop_home")],
+                    [InlineKeyboardButton("👥 BEDAVA KREDİ KAZAN", callback_data="ref")]
                 ])
-                await status_msg.edit("😱 **HAKKINIZ BİTTİ!**\n\nBakiyeniz: 0\nDevam etmek için aşağıdaki seçenekleri kullanın:", reply_markup=btn)
+                await status_msg.edit("⛔ **HAKKINIZ BİTTİ!**\n\nİndirme yapmak için bakiyeniz yetersiz.", reply_markup=btn)
                 continue
             
-            # 🔥 Krediyi Peşin Düşüyoruz
+            # 🔥 PEŞİN DÜŞ (RESERVE)
             used_source = reserve_credit(user_id)
-            if not used_source: # Çifte kontrol
-                await status_msg.edit("⛔ Hata: Bakiye Yetersiz.")
+            if not used_source:
+                await status_msg.edit("⛔ Teknik Hata: Bakiye düşülemedi.")
                 continue
 
-            # 2. LİNK ANALİZİ
+            # 2. LİNK AYIKLAMA (REGEX V2)
             chat_id, msg_id = None, None
-            link_clean = link.replace("https://", "").replace("http://", "").replace("t.me/", "").replace("telegram.me/", "").split("?")[0]
-            parts = link_clean.split("/")
-            
-            try:
-                if parts[0] == "c": 
-                    chat_id = int("-100" + parts[1])
-                    msg_id = int(parts[2])
-                else: 
-                    chat_id = parts[0]
-                    msg_id = int(parts[1])
-            except:
-                refund_credit(user_id, used_source) # İADE
-                await status_msg.edit("❌ Link Hatalı! Krediniz iade edildi.")
+            # Regex: (t.me/c/ID/MSG_ID) veya (t.me/user/MSG_ID)
+            match_private = re.search(r"(?:t\.me/c/|telegram\.me/c/)(\d+)/(\d+)", link)
+            match_public = re.search(r"(?:t\.me/|telegram\.me/)(?!c/)([\w\d_]+)/(\d+)", link)
+
+            if match_private:
+                chat_id = int("-100" + match_private.group(1))
+                msg_id = int(match_private.group(2))
+            elif match_public:
+                chat_id = match_public.group(1) # username
+                msg_id = int(match_public.group(2))
+            else:
+                refund_credit(user_id, used_source)
+                await status_msg.edit("❌ **GEÇERSİZ LİNK!**\nLütfen sadece Telegram mesaj linki gönderin.")
                 continue
 
+            # 🛠️ ERİŞİM KONTROLÜ (Resolve Peer)
             try:
-                if str(chat_id).startswith("-100"): await userbot.get_chat(chat_id)
-            except: pass
+                # Userbot'a "Git şu chat'i bul" diyoruz. Bulamazsa 400 hatası verir.
+                await userbot.get_chat(chat_id)
+            except Exception as e:
+                refund_credit(user_id, used_source)
+                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]])
+                await status_msg.edit("🚫 **ERİŞİM YOK!**\n\nBot bu kanalı göremiyor.\nLütfen kanalın **Davet Linkini** bota gönderin.", reply_markup=btn)
+                continue
 
             target_msg = None
             try: target_msg = await userbot.get_messages(chat_id, msg_id)
             except Exception as e:
-                refund_credit(user_id, used_source) # İADE
-                await status_msg.edit(f"🚫 **ERİŞİM YOK!**\nKrediniz iade edildi.\n\n`{e}`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+                refund_credit(user_id, used_source)
+                await status_msg.edit(f"❌ Mesaj alınamadı: {e}")
                 continue
             
             if target_msg and (target_msg.video or target_msg.photo or target_msg.document):
-                # Kota Kontrolü
                 file_size = 0
                 if target_msg.video: file_size = target_msg.video.file_size
                 elif target_msg.document: file_size = target_msg.document.file_size
@@ -274,11 +264,10 @@ async def worker():
                 
                 user_limit = get_size_limit(user_id)
                 if file_size > user_limit:
-                    refund_credit(user_id, used_source) # İADE
+                    refund_credit(user_id, used_source)
                     limit_mb = int(user_limit / 1024 / 1024)
-                    msg_txt = f"⚠️ **LİMİT ({limit_mb} MB)**\nDosya çok büyük. Krediniz iade edildi."
-                    btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 Yükselt", callback_data="shop_home")]]) if limit_mb < 100 else None
-                    await status_msg.edit(msg_txt, reply_markup=btn)
+                    btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 LİMİTİ ARTIR", callback_data="shop_home")]])
+                    await status_msg.edit(f"⚠️ **BOYUT SINIRI AŞILDI**\n\nDosya: {int(file_size/1024/1024)} MB\nSizin Limitiniz: {limit_mb} MB\n\nKrediniz iade edildi.", reply_markup=btn)
                     continue
 
                 await status_msg.edit("⬇️ **İndiriliyor...**")
@@ -290,39 +279,53 @@ async def worker():
                 elif target_msg.photo: await client.send_photo(user_id, path, caption=caption)
                 elif target_msg.document: await client.send_document(user_id, path, caption=caption)
                 
-                # Başarılı - Kredi zaten düşüldü, bilgi ver
+                # BAŞARILI - İADE YAPMA
                 u = get_user(user_id)
-                info = f"💰 Kalan Kredi: **{u['balance']}**" if used_source == "Kredi" else f"📅 Kalan Hak: **{SUB_PACKS[u['sub_type']]['daily_limit'] - u['daily_usage']}**"
+                rem = u['balance'] if used_source == "Kredi" else (SUB_PACKS[u['sub_type']]['daily_limit'] - u['daily_usage'])
+                info = f"💰 Kalan Kredi: **{rem}**" if used_source == "Kredi" else f"📅 Günlük Hak: **{rem} Kaldı**"
                 
-                await status_msg.edit(f"✅ **Tamamlandı!**\n{info}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
+                await status_msg.edit(f"✅ **İndirme Başarılı!**\n{info}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
                 if os.path.exists(path): os.remove(path)
-                # Otomatik yedek saatlik çalışır, burada yok.
                 
             else:
-                refund_credit(user_id, used_source) # İADE
-                await status_msg.edit("❌ Medya bulunamadı. Kredi iade edildi.")
+                refund_credit(user_id, used_source)
+                await status_msg.edit("❌ İndirilebilir medya bulunamadı. Kredi iade edildi.")
                 
         except Exception as e:
-            if used_source: refund_credit(user_id, used_source) # İADE
+            if used_source: refund_credit(user_id, used_source)
             try: await status_msg.edit(f"❌ Hata: {e}\nKredi iade edildi.")
             except: pass
             if 'path' in locals() and os.path.exists(path): os.remove(path)
         await asyncio.sleep(2)
 
-# ==================== ⚡ MENÜLER ====================
-def main_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📥 Link İndir", callback_data="dl"), InlineKeyboardButton("💰 Hesabım", callback_data="acc")],
-        [InlineKeyboardButton("💎 MAĞAZA", callback_data="shop_home")],
-        [InlineKeyboardButton("❓ Yardım", callback_data="howto"), InlineKeyboardButton("👥 Referans", callback_data="ref")],
-        [InlineKeyboardButton("👨‍💻 Destek", callback_data="service")]
+# ==================== ⚡ PROFESYONEL MENÜ (DASHBOARD) ====================
+def main_menu(user_id):
+    u = get_user(user_id)
+    sub_txt = "Yok"
+    if u["sub_type"] != "none":
+        days = int((u["sub_expiry"] - time.time()) / 86400)
+        sub_txt = f"{SUB_PACKS[u['sub_type']]['name']} ({days} Gün)"
+    
+    txt = (
+        f"👋 **Hoş Geldin, {u.get('first_name', 'Değerli Üye')}**\n\n"
+        f"🆔 **ID:** `{user_id}`\n"
+        f"💰 **Kredi Bakiyesi:** `{u['balance']}`\n"
+        f"📅 **Abonelik:** `{sub_txt}`\n"
+        f"📉 **Toplam İndirme:** `{u.get('total_spent', 0)}`\n\n"
+        f"👇 **İşlemler Menüsü:**"
+    )
+    
+    return txt, InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 İÇERİK İNDİR", callback_data="dl"), InlineKeyboardButton("💎 MARKET & VIP", callback_data="shop_home")],
+        [InlineKeyboardButton("👤 PROFİLİM", callback_data="acc"), InlineKeyboardButton("👥 REFERANS", callback_data="ref")],
+        [InlineKeyboardButton("🆘 DESTEK HATTI", callback_data="service"), InlineKeyboardButton("❓ YARDIM", callback_data="howto")]
     ])
 
 def shop_home_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 KREDİ (Otomatik)", callback_data="shop_credits")],
-        [InlineKeyboardButton("📅 ABONELİK (Yıldızla Gruba Gir)", callback_data="shop_subs")],
-        [InlineKeyboardButton("🔙 Ana Menü", callback_data="back_home")]
+        [InlineKeyboardButton("💰 KREDİ YÜKLE (Otomatik)", callback_data="shop_credits")],
+        [InlineKeyboardButton("📅 VIP ABONELİK (Aylık)", callback_data="shop_subs")],
+        [InlineKeyboardButton("🔙 Ana Menüye Dön", callback_data="back_home")]
     ])
 
 async def menu_switcher(client, message, text, reply_markup=None):
@@ -335,43 +338,47 @@ async def menu_switcher(client, message, text, reply_markup=None):
 async def start(client, message):
     user_id = message.from_user.id
     u = get_user(user_id)
+    # Referans
     if len(message.command) > 1:
         try:
             ref_id = message.command[1]
-            if str(ref_id) != str(user_id):
-                u = get_user(user_id)
-                if u["invited_by"] is None:
-                    db_cache["users"][str(user_id)]["invited_by"] = str(ref_id)
-                    db_cache["users"][str(user_id)]["balance"] += 3 
-                    if str(ref_id) in db_cache["users"]:
-                        db_cache["users"][str(ref_id)]["balance"] += 2
-                        try: await client.send_message(int(ref_id), "🎉 **Referans!** +2 Kredi kazandın.")
-                        except: pass
+            if str(ref_id) != str(user_id) and u["invited_by"] is None:
+                db_cache["users"][str(user_id)]["invited_by"] = str(ref_id)
+                db_cache["users"][str(user_id)]["balance"] += 3 
+                if str(ref_id) in db_cache["users"]:
+                    db_cache["users"][str(ref_id)]["balance"] += 2
+                    try: await client.send_message(int(ref_id), "🎉 **Referans Kazancı!** +2 Kredi hesabına eklendi.")
+                    except: pass
         except: pass
-    await menu_switcher(client, message, f"👋 **Merhaba {message.from_user.first_name}!**\n\nTelegram'ın en hızlı indiricisine hoş geldin.\n🎁 **Hediye:** 3 Kredi Tanımlandı.\n\n👇 **Menü:**", main_menu())
+    
+    txt, markup = main_menu(user_id)
+    await menu_switcher(client, message, txt, markup)
 
-# 👑 ADMIN
+# 👑 ADMIN PANELİ (DÜZELTİLDİ)
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
 async def admin_cmd(client, message):
-    # İSTATİSTİK HESAPLAMA
-    total = len(db_cache["users"])
-    active_balance = sum(1 for u in db_cache["users"].values() if u["balance"] > 0)
-    active_subs = sum(1 for u in db_cache["users"].values() if u["sub_type"] != "none")
-    
-    info_text = (
-        f"👑 **YÖNETİCİ PANELİ**\n\n"
-        f"👥 **Toplam Üye:** {total}\n"
-        f"💰 **Bakiyeli Üye:** {active_balance}\n"
-        f"📅 **Aboneli Üye:** {active_subs}"
-    )
-    
-    btns = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💰 Fiyatlar", callback_data="admin_prices"), InlineKeyboardButton("🏷️ İndirim", callback_data="admin_discount_info")],
-        [InlineKeyboardButton("➕ Kredi Ver", callback_data="admin_addc"), InlineKeyboardButton("➕ Abone Yap", callback_data="admin_adds")],
-        [InlineKeyboardButton("📢 Duyuru", callback_data="admin_cast"), InlineKeyboardButton("💾 Yedek Al", callback_data="admin_backup")],
-        [InlineKeyboardButton("🔙 Çıkış", callback_data="back_home")]
-    ])
-    await menu_switcher(client, message, info_text, btns)
+    try:
+        users = db_cache.get("users", {})
+        tot = len(users)
+        active = sum(1 for u in users.values() if u.get("balance", 0) > 0)
+        subs = sum(1 for u in users.values() if u.get("sub_type", "none") != "none")
+        
+        info = (
+            f"👑 **YÖNETİCİ KONTROL PANELİ**\n\n"
+            f"👥 **Toplam Kullanıcı:** {tot}\n"
+            f"💰 **Bakiyeli (Aktif):** {active}\n"
+            f"📅 **Aboneli (VIP):** {subs}\n"
+        )
+        
+        btns = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💰 Fiyatlar", callback_data="admin_prices"), InlineKeyboardButton("🏷️ İndirim", callback_data="admin_discount_info")],
+            [InlineKeyboardButton("➕ Kredi Ekle", callback_data="admin_addc"), InlineKeyboardButton("➕ Abone Ekle", callback_data="admin_adds")],
+            [InlineKeyboardButton("📢 Duyuru Yap", callback_data="admin_cast"), InlineKeyboardButton("💾 Yedek Al", callback_data="admin_backup")],
+            [InlineKeyboardButton("🔙 Çıkış", callback_data="back_home")]
+        ])
+        await menu_switcher(client, message, info, btns)
+    except Exception as e:
+        await message.reply(f"❌ Panel Hatası: {e}")
 
 @bot.on_message(filters.command("setprice") & filters.user(OWNER_ID))
 async def set_price(c, m):
@@ -455,7 +462,10 @@ async def cb_handler(client, callback):
     uid = callback.from_user.id
     u = get_user(uid)
     
-    if data == "back_home": await menu_switcher(client, callback.message, f"👋 **Ana Menü**", main_menu())
+    if data == "back_home":
+        txt, markup = main_menu(uid)
+        await menu_switcher(client, callback.message, txt, markup)
+        
     elif data == "shop_home": await menu_switcher(client, callback.message, "🛒 **MAĞAZA**\nLütfen bir kategori seçiniz:", shop_home_menu())
     
     elif data == "shop_credits":
@@ -483,16 +493,12 @@ async def cb_handler(client, callback):
         await callback.answer("✅ Fatura gönderildi!", show_alert=True)
 
     elif data == "acc":
-        sub_txt = "Yok"
-        if u["sub_type"] != "none":
-            days = int((u["sub_expiry"] - time.time()) / 86400)
-            sub_txt = f"{SUB_PACKS[u['sub_type']]['name']} ({days} Gün)"
-        txt = (f"👤 **PROFİLİM**\n\n💰 **Kredi:** {u['balance']}\n📅 **Abonelik:** {sub_txt}\n📉 İndirme: {u.get('total_spent', 0)}")
+        txt, markup = main_menu(uid) # Profil zaten ana menüde
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
 
     elif data == "ref":
         link = f"https://t.me/{FIXED_BOT_USERNAME}?start={uid}"
-        txt = f"👥 **REFERANS**\nArkadaşını davet et, **+2 Kredi** kazan!\n\n🔗 `{link}`"
+        txt = f"👥 **REFERANS SİSTEMİ**\n\nBu linki arkadaşlarına at:\n`{link}`\n\n🎁 **Kazanç:** Her gelen kişi için **+2 Kredi** kazanırsın!"
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=f"https://t.me/share/url?url={link}"), InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
     
     elif data == "admin_backup":
@@ -508,9 +514,9 @@ async def cb_handler(client, callback):
     elif data == "admin_adds": await client.send_message(uid, "ℹ️ `/setsub ID sub_trial`\nPaketler: sub_trial, sub_mid, sub_high")
     elif data == "admin_cast": await client.send_message(uid, "ℹ️ `/duyuru MESAJ`")
     
-    elif data == "howto": await menu_switcher(client, callback.message, "❓ **YARDIM**\n\n1️⃣ İçerik linkini bota at.\n2️⃣ Bot indirip sana yollasın.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
-    elif data == "service": await menu_switcher(client, callback.message, f"👨‍💻 **DESTEK**\n\n@{OWNER_USERNAME}", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
-    elif data == "dl": await menu_switcher(client, callback.message, "📂 **İndirme Modu**\nLink gönderin.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+    elif data == "howto": await menu_switcher(client, callback.message, "❓ **NASIL KULLANILIR?**\n\n1️⃣ İçerik linkini kopyala.\n2️⃣ Bu bota gönder.\n3️⃣ İndirilmesini bekle.\n\n⚠️ **HATA ALIRSAN:**\nBot 'Erişim Yok' derse, o kanalın davet linkini bota at.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+    elif data == "service": await menu_switcher(client, callback.message, f"👨‍💻 **DESTEK & İLETİŞİM**\n\nSahibi: @{OWNER_USERNAME}", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
+    elif data == "dl": await menu_switcher(client, callback.message, "📂 **İNDİRME MODU**\n\nLütfen indirmek istediğiniz Telegram linkini yapıştırın.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
 
 # 🔥 ÖDEME ONAYI
 @bot.on_raw_update()
@@ -530,7 +536,7 @@ async def success(c, m):
         pkg = CREDIT_PACKS.get(key)
         if pkg:
             add_credits(m.from_user.id, pkg["amount"])
-            await m.reply(f"🎉 **BAŞARILI!**\n💰 +{pkg['amount']} Kredi yüklendi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 Cüzdan", callback_data="acc")]]))
+            await m.reply(f"🎉 **ÖDEME BAŞARILI!**\n💰 +{pkg['amount']} Kredi hesabına yüklendi.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💰 Cüzdan", callback_data="acc")]]))
             try: await c.send_message(OWNER_ID, f"💰 SATIŞ: {pkg['name']}")
             except: pass
     await save_backup("Satış")
@@ -540,11 +546,10 @@ async def main():
     print("🤖 Başlatılıyor...")
     await bot.start()
     await userbot.start()
-    await refresh_userbot_cache() # Körlük Çözümü
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V73.0 SOLID ACCOUNTING ACTIVE")
+    print("✅ V74.0 MASTERPIECE ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
