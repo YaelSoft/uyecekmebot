@@ -6,6 +6,7 @@ import logging
 import datetime
 import requests
 import re
+import gc
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters, idle
@@ -56,12 +57,12 @@ LIMIT_VIP  = 500 * 1024 * 1024   # 500 MB
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV86")
+logger = logging.getLogger("YaelV89")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V86.0 FINAL COUNTER Active 🟢"
+def home(): return "Yael Saver V89.0 IRON GATE Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -74,9 +75,9 @@ db_cache = {"users": {}, "config": {"prices": DEFAULT_CREDIT_PACKS.copy()}}
 async def restore_data():
     global db_cache, CREDIT_PACKS
     if LOG_CHANNEL == 0: return
-    print("📥 YEDEK ARANIYOR (SON 100)...")
+    print("📥 YEDEK ARANIYOR...")
     try:
-        async for msg in bot.get_chat_history(LOG_CHANNEL, limit=100):
+        async for msg in bot.get_chat_history(LOG_CHANNEL, limit=50):
             if msg.document and msg.document.file_name == DB_FILE:
                 await bot.download_media(msg, file_name=DB_FILE)
                 with open(DB_FILE, "r") as f:
@@ -112,6 +113,22 @@ async def force_cache_refresh():
         print(f"✅ Userbot hazır.")
     except: pass
 
+@bot.on_message(filters.document & filters.user(OWNER_ID) & filters.private)
+async def manual_restore(c, m):
+    if m.document.file_name == DB_FILE:
+        msg = await m.reply("📥 Manuel yedek yükleniyor...")
+        try:
+            await m.download(file_name=DB_FILE)
+            global db_cache, CREDIT_PACKS
+            with open(DB_FILE, "r") as f:
+                data = json.load(f)
+                if "users" in data: db_cache = data
+                if "config" in data and "prices" in data["config"]:
+                    CREDIT_PACKS = data["config"]["prices"]
+            await msg.edit(f"✅ **YEDEK GÜNCELLENDİ!**\nKullanıcı Sayısı: {len(db_cache['users'])}")
+        except Exception as e:
+            await msg.edit(f"❌ Hata: {e}")
+
 # ==================== 🧠 KULLANICI MANTIĞI ====================
 def get_user(user_id, first_name=None):
     uid = str(user_id)
@@ -122,7 +139,6 @@ def get_user(user_id, first_name=None):
             "daily_usage": 0, "last_reset": today, "invited_by": None,
             "first_name": first_name or "Kullanıcı"
         }
-    
     user = db_cache["users"][uid]
     if first_name: user["first_name"] = first_name
     
@@ -134,16 +150,17 @@ def get_user(user_id, first_name=None):
             user["sub_expiry"] = 0
             try: bot.send_message(int(uid), "⚠️ **Aboneliğiniz Sona Erdi!**")
             except: pass
-    
-    if user["balance"] < 0: user["balance"] = 0 # Eksi bakiye koruması
+    if user["balance"] < 0: user["balance"] = 0
     return user
 
 def check_access(user_id):
     if user_id == OWNER_ID: return True, "Patron"
     u = get_user(user_id)
+    # 1. Abonelik Kontrolü
     if u["sub_type"] != "none":
         pkg = SUB_PACKS.get(u["sub_type"])
         if pkg and u["daily_usage"] < pkg["daily_limit"]: return True, "Abonelik"
+    # 2. Kredi Kontrolü (Bakiye 0 ise REDDEDER)
     if u["balance"] > 0: return True, "Kredi"
     return False, "Yetersiz"
 
@@ -152,6 +169,28 @@ def get_size_limit(user_id):
     u = get_user(user_id)
     is_vip = (u["sub_type"] != "none" or u["total_spent"] > 0)
     return LIMIT_VIP if is_vip else LIMIT_FREE
+
+def reserve_credit(user_id):
+    if user_id == OWNER_ID: return "Admin"
+    uid = str(user_id)
+    u = db_cache["users"][uid]
+    if u["sub_type"] != "none":
+        pkg = SUB_PACKS.get(u["sub_type"])
+        if pkg and u["daily_usage"] < pkg["daily_limit"]:
+            u["daily_usage"] += 1; return "Abonelik"
+    if u["balance"] > 0:
+        u["balance"] -= 1; u["total_spent"] += 1; return "Kredi"
+    return False
+
+def refund_credit(user_id, source):
+    if user_id == OWNER_ID: return
+    uid = str(user_id)
+    u = db_cache["users"][uid]
+    if source == "Abonelik":
+        if u["daily_usage"] > 0: u["daily_usage"] -= 1
+    elif source == "Kredi":
+        u["balance"] += 1
+        if u["total_spent"] > 0: u["total_spent"] -= 1
 
 def add_credits(user_id, amount):
     uid = str(user_id)
@@ -185,7 +224,7 @@ def send_invoice_via_http(chat_id, package_key):
         requests.post(url, data=payload)
     except: pass
 
-# ==================== 🏭 İŞÇİ (HESAP TUTAN VERSİYON) ====================
+# ==================== 🏭 İŞÇİ (ÇİFT DUVARLI GÜVENLİK) ====================
 download_queue = asyncio.PriorityQueue()
 
 async def worker():
@@ -193,18 +232,26 @@ async def worker():
     while True:
         priority, task = await download_queue.get()
         client, status_msg, link, user_id = task
+        used_source = None
+        is_success = False 
         
         try:
-            # 1. HAK KONTROLÜ
+            # 🔥 DUVAR 2: İŞLEM ODASI KONTROLÜ
             allowed, reason = check_access(user_id)
             if not allowed:
-                # 🔥 HAK BİTİŞ MESAJI (İSTEDİĞİN GİBİ)
-                msg_txt = "⛔ **HAKKINIZ BİTTİ!**\n\nKredi/Vip alarak veya referans kasarak hak kazanabilirsiniz.\n\n✨ _İyi kullanımlar dileriz.._"
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 KREDİ/VİP AL", callback_data="shop_home")], [InlineKeyboardButton("👥 REFERANS KAS", callback_data="ref")]])
-                await status_msg.edit(msg_txt, reply_markup=btn)
+                await status_msg.edit("❌ **HAKKINIZ BİTTİ!**\n\nKredi/Vip alarak veya referans kasarak hak kazanabilirsiniz.\n\n✨ _İyi kullanımlar dileriz.._", reply_markup=btn)
                 continue
+            
+            # 2. PEŞİN DÜŞ (RESERVE)
+            used_source = reserve_credit(user_id)
+            if not used_source:
+                await status_msg.edit("⛔ Bakiye hatası.")
+                continue
+            
+            asyncio.create_task(save_backup("İşlem Başı"))
 
-            # 2. LİNK ANALİZİ
+            # 3. LİNK ANALİZİ
             chat_id, msg_id = None, None
             clean_link = link.replace("https://", "").replace("http://", "").replace("t.me/", "").replace("telegram.me/", "").split("?")[0]
             parts = clean_link.split("/")
@@ -212,12 +259,16 @@ async def worker():
                 if parts[0] == "c": chat_id = int("-100" + parts[1]); msg_id = int(parts[2])
                 else: chat_id = parts[0]; msg_id = int(parts[1])
             except:
+                refund_credit(user_id, used_source)
+                asyncio.create_task(save_backup("İade")) 
                 await status_msg.edit("❌ Link formatı hatalı.")
                 continue
 
             try:
                 if isinstance(chat_id, int): await userbot.get_chat(chat_id)
             except:
+                refund_credit(user_id, used_source)
+                asyncio.create_task(save_backup("İade")) 
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]])
                 await status_msg.edit(f"🚫 **ERİŞİM YOK!**\n\nKanalın **Davet Linkini** bota atın.", reply_markup=btn)
                 continue
@@ -225,10 +276,14 @@ async def worker():
             target_msg = None
             try: target_msg = await userbot.get_messages(chat_id, msg_id)
             except Exception as e:
+                refund_credit(user_id, used_source) 
+                asyncio.create_task(save_backup("İade"))
                 await status_msg.edit(f"❌ Mesaj alınamadı: {e}")
                 continue
             
             if not target_msg or target_msg.empty:
+                refund_credit(user_id, used_source)
+                asyncio.create_task(save_backup("İade"))
                 await status_msg.edit("❌ **MESAJ BOŞ!**")
                 continue
 
@@ -249,17 +304,19 @@ async def worker():
                 elif target_msg.video_note: file_size = target_msg.video_note.file_size; media_type = "video_note"
                 elif target_msg.animation: file_size = target_msg.animation.file_size; media_type = "animation"
                 
-                # 🔥 KESİN VERİ LİMİTİ KONTROLÜ
+                # 🔥 KESİN LİMİT KONTROLÜ
                 user_limit = get_size_limit(user_id)
                 if file_size > user_limit:
+                    refund_credit(user_id, used_source)
+                    asyncio.create_task(save_backup("İade"))
+                    
                     limit_mb = int(user_limit / 1024 / 1024)
                     file_mb = int(file_size / 1024 / 1024)
+                    
                     if user_limit == LIMIT_FREE:
-                        # Ücretsiz Kullanıcıya Uyarı
                         warn_txt = f"⚠️ **LİMİT ({limit_mb} MB)**\nDosya Boyutu: {file_mb} MB\n\nÜcretsiz hakta 100 MB üstü indiremezsiniz.\nVIP alarak 500 MB'a kadar indirebilirsiniz."
                         btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 VIP'e Geç", callback_data="shop_home")]])
                     else:
-                        # VIP Kullanıcıya Uyarı
                         warn_txt = f"🛑 **VIP SINIRI (500 MB)**\nDosya Boyutu: {file_mb} MB\n\nVIP sınırını aşıyor."
                         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]])
                         
@@ -287,51 +344,53 @@ async def worker():
                     elif media_type == "video_note": await client.send_video_note(user_id, path)
                     elif media_type == "animation": await client.send_animation(user_id, path, caption=caption)
                     
-                    # 🔥🔥🔥 HAK DÜŞME İŞLEMİ (BURADA YAPIYORUZ Kİ İADE OLMASIN) 🔥🔥🔥
-                    uid = str(user_id)
-                    u = db_cache["users"][uid]
-                    rem = 0
+                    is_success = True
                     
-                    if u["sub_type"] != "none":
-                        u["daily_usage"] += 1
+                    u = get_user(user_id)
+                    rem = 0
+                    info_msg = ""
+                    if used_source == "Abonelik":
                         rem = SUB_PACKS[u['sub_type']]['daily_limit'] - u['daily_usage']
-                        info_msg = f"📅 Abonelik: **{rem} Hak Kaldı**"
+                        info_msg = f"📅 Kalan Hak: **{rem}**"
                     else:
-                        if u["balance"] > 0:
-                            u["balance"] -= 1
-                            u["total_spent"] += 1
-                        rem = u["balance"]
+                        rem = u['balance']
                         info_msg = f"📉 Kalan Hak: **{rem}**"
                     
-                    # Eğer hak 0 ise veya daha az ise
                     if rem <= 0 and u["sub_type"] == "none":
                          info_msg = "❌ **HAKKINIZ BİTTİ!**\nKredi/Vip alarak veya referans kasarak hak kazanabilirsiniz.\n✨ _İyi kullanımlar dileriz.._"
                     
                     await status_msg.edit(f"✅ **İşlem Tamam!**\n{info_msg}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
                     
-                    # 🔥 ANINDA KAYIT (GARANTİ)
                     asyncio.create_task(save_backup("Harcama"))
 
                 except Exception as send_e:
-                    await status_msg.edit(f"⚠️ Hata: {send_e}")
+                    if not is_success: await status_msg.edit(f"⚠️ Hata: {send_e}")
 
                 try:
                     if os.path.exists(path): os.remove(path)
                     if thumb_path and os.path.exists(thumb_path): os.remove(thumb_path)
+                    gc.collect()
                 except: pass
                 
             else:
-                await status_msg.edit("❌ Desteklenmeyen medya.")
+                refund_credit(user_id, used_source) 
+                asyncio.create_task(save_backup("İade"))
+                await status_msg.edit("❌ Desteklenmeyen medya. Kredi iade edildi.")
                 
         except Exception as e:
-            try: await status_msg.edit(f"❌ Hata: {e}")
-            except: pass
+            if not is_success:
+                if used_source: 
+                    refund_credit(user_id, used_source)
+                    asyncio.create_task(save_backup("İade"))
+                try: await status_msg.edit(f"❌ Hata: {e}\nKredi iade edildi.")
+                except: pass
             try: 
                 if 'path' in locals() and os.path.exists(path): os.remove(path)
+                gc.collect() 
             except: pass
         await asyncio.sleep(2)
 
-# ==================== ⚡ PRESTİJ MENÜ ====================
+# ==================== ⚡ MENÜLER ====================
 def main_menu(user_id):
     u = get_user(user_id)
     name = u.get("first_name", "Kullanıcı")
@@ -417,7 +476,7 @@ async def admin_cmd(client, message):
         btns = InlineKeyboardMarkup([
             [InlineKeyboardButton("💰 Fiyatlar", callback_data="admin_prices"), InlineKeyboardButton("🏷️ İndirim", callback_data="admin_discount_info")],
             [InlineKeyboardButton("➕ Kredi Ekle", callback_data="admin_addc"), InlineKeyboardButton("➕ Abone Ekle", callback_data="admin_adds")],
-            [InlineKeyboardButton("📢 Duyuru Yap", callback_data="admin_cast"), InlineKeyboardButton("💾 Yedek Al", callback_data="admin_backup")],
+            [InlineKeyboardButton("📢 Duyuru Yap", callback_data="admin_cast"), InlineKeyboardButton("📂 Yedek Yükle (Manuel)", callback_data="admin_restore_info")],
             [InlineKeyboardButton("🔙 Çıkış", callback_data="back_home")]
         ])
         await menu_switcher(client, message, info, btns)
@@ -485,15 +544,20 @@ async def broad(c, m):
         except: pass
     await msg.edit(f"✅ {cnt} kişiye iletildi.")
 
+# 🔥 DUVAR 1: KAPI GİRİŞİ KONTROLÜ (KESİN ÇÖZÜM)
 @bot.on_message(filters.regex(r"https://t.me/") & filters.private)
 async def dl_link(client, message):
     if "join" in message.text: return
     user_id = message.from_user.id
+    
+    # 🔥 EN BAŞTA KONTROL ET VE REDDET
     allowed, reason = check_access(user_id)
     if not allowed:
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 KREDİ/VİP AL", callback_data="shop_home")], [InlineKeyboardButton("👥 REFERANS KAS", callback_data="ref")]])
+        # HAK BİTİŞ MESAJI (BURADA DA VERİYORUZ Kİ KUYRUĞA GİRMESİN)
         await message.reply("❌ **HAKKINIZ BİTTİ!**\n\nKredi/Vip alarak veya referans kasarak hak kazanabilirsiniz.\n\n✨ _İyi kullanımlar dileriz.._", reply_markup=btn)
-        return
+        return # ⛔ BURADA KESİLİR, KUYRUĞA GİRMEZ!
+
     st = await message.reply(f"⏳ **Sıraya Alındı...**")
     u = get_user(user_id, message.from_user.first_name)
     prio = 1 if u["sub_type"] != "none" else 2
@@ -525,6 +589,9 @@ async def cb_handler(client, callback):
             "💬 **Detaylı bilgi ve fiyat için:** @yasin33"
         )
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("💬 İletişime Geç", url=f"https://t.me/{OWNER_USERNAME}"), InlineKeyboardButton("🔙 Geri", callback_data="shop_home")]]))
+
+    elif data == "admin_restore_info":
+        await client.send_message(uid, "📥 **MANUEL YEDEK YÜKLEME**\n\nElinizdeki `users.json` dosyasını bu mesaja cevap olarak veya direkt bota gönderin.\nBot otomatik olarak veritabanını güncelleyecektir.")
 
     elif data == "shop_credits":
         txt = "💰 **KREDİ PAKETLERİ (OTOMATİK)**\nSatın al'a basınca fatura çıkar.\n\n"
@@ -608,7 +675,7 @@ async def main():
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V86.0 FINAL COUNTER ACTIVE")
+    print("✅ V89.0 IRON GATE ACTIVE")
     await idle()
     await save_backup("Kapanış")
     await bot.stop()
