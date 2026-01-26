@@ -56,12 +56,12 @@ LIMIT_VIP  = 500 * 1024 * 1024   # 500 MB
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV95")
+logger = logging.getLogger("YaelV96")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V95.0 SILENT MODE Active 🟢"
+def home(): return "Yael Saver V96.0 FIXED RESTORE Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -78,8 +78,9 @@ async def restore_data():
     try:
         async for msg in bot.get_chat_history(LOG_CHANNEL, limit=50):
             if msg.document and msg.document.file_name == DB_FILE:
-                await bot.download_media(msg, file_name=DB_FILE)
-                with open(DB_FILE, "r") as f:
+                # Burada da fix uyguladım
+                path = await bot.download_media(msg)
+                with open(path, "r") as f:
                     data = json.load(f)
                     if "users" in data: db_cache = data
                     if "config" in data and "prices" in data["config"]:
@@ -88,17 +89,13 @@ async def restore_data():
                 return
     except: pass
 
-# 🔥 YENİ YEDEKLEME FONKSİYONU (SESSİZ MODLU)
 async def save_backup(reason="Otomatik", silent=False):
     global db_cache, CREDIT_PACKS
-    
-    # Her zaman yerel dosyaya kaydet (Çökme ihtimaline karşı)
     try:
         db_cache["config"] = {"prices": CREDIT_PACKS}
         with open(DB_FILE, "w") as f: json.dump(db_cache, f, indent=4)
     except: pass
 
-    # Eğer SESSİZ moddaysa kanala gönderme (Log kirliliği olmasın)
     if silent: return
     if LOG_CHANNEL == 0: return
 
@@ -113,26 +110,45 @@ async def save_backup(reason="Otomatik", silent=False):
 
 async def backup_loop():
     while True:
-        await asyncio.sleep(7200) # 🔥 2 SAATTE BİR (7200 Saniye)
-        await save_backup(reason="2 Saatlik Oto-Yedek", silent=False) # Kanala atar
+        await asyncio.sleep(7200) # 2 Saatte bir
+        await save_backup(reason="2 Saatlik Oto-Yedek", silent=False)
 
 async def force_cache_refresh():
     try:
         async for dialog in userbot.get_dialogs(): pass
     except: pass
 
+# 🔥🔥🔥 DÜZELTİLEN YEDEK YÜKLEME KISMI (BURASI!) 🔥🔥🔥
 @bot.on_message(filters.document & filters.user(OWNER_ID) & filters.private)
 async def manual_restore(c, m):
     if m.document.file_name == DB_FILE:
-        msg = await m.reply("📥 Manuel yedek yükleniyor...")
+        msg = await m.reply("📥 **YEDEK DOSYASI ALINIYOR...**")
         try:
-            await m.download(file_name=DB_FILE)
-            global db_cache
-            with open(DB_FILE, "r") as f:
-                data = json.load(f)
-                if "users" in data: db_cache = data
-            await msg.edit(f"✅ **YÜKLENDİ!**\nÜye: {len(db_cache['users'])}")
-        except Exception as e: await msg.edit(f"❌ Hata: {e}")
+            # FIX: Dosyayı indirip YOLUNU (path) alıyoruz.
+            path = await m.download()
+            
+            global db_cache, CREDIT_PACKS
+            with open(path, "r") as f:
+                new_data = json.load(f)
+                
+                if "users" in new_data:
+                    db_cache = new_data # Hafızayı ez
+                if "config" in new_data and "prices" in new_data["config"]:
+                    CREDIT_PACKS = new_data["config"]["prices"]
+            
+            # Ana dosyaya da yaz ki bot kapanırsa silinmesin
+            with open(DB_FILE, "w") as f: json.dump(db_cache, f, indent=4)
+            
+            # Geçici indirilen dosyayı sil (RAM Şişmesin)
+            os.remove(path)
+            
+            await msg.edit(f"✅ **YEDEK YÜKLENDİ!**\n\n👥 Üye Sayısı: {len(db_cache['users'])}\n\n_Sistem kaldığı yerden devam ediyor._")
+            
+            # Log kanalına da bir kopyasını atalım garanti olsun
+            await save_backup("Manuel Restore Sonrası", silent=False)
+            
+        except Exception as e:
+            await msg.edit(f"❌ **HATA:** Dosya bozuk.\n`{e}`")
 
 # ==================== 🧠 KULLANICI YÖNETİMİ ====================
 def get_user(user_id, first_name=None):
@@ -251,7 +267,6 @@ async def worker():
                 await status_msg.edit("⛔ Bakiye hatası.")
                 continue
             
-            # 🔥 BURASI DEĞİŞTİ: Sessiz kayıt al (Loga atmaz, sadece diske yazar)
             asyncio.create_task(save_backup(reason="Harcama", silent=True))
 
             # 3. LİNK ANALİZİ
@@ -309,7 +324,6 @@ async def worker():
                 if file_size > user_limit:
                     refund_credit(user_id, used_source)
                     asyncio.create_task(save_backup("İade", silent=True))
-                    
                     limit_mb = int(user_limit / 1024 / 1024)
                     btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 YÜKSELT", callback_data="shop_home")]]) if user_limit == LIMIT_FREE else None
                     await status_msg.edit(f"⚠️ **LİMİT AŞILDI ({limit_mb} MB)**\n\nBu dosya limitinizi aşıyor.", reply_markup=btn)
@@ -462,7 +476,7 @@ async def admin_cmd(client, message):
         btns = InlineKeyboardMarkup([
             [InlineKeyboardButton("💰 Fiyatlar", callback_data="admin_prices"), InlineKeyboardButton("🏷️ İndirim", callback_data="admin_discount_info")],
             [InlineKeyboardButton("➕ Kredi Ekle", callback_data="admin_addc"), InlineKeyboardButton("➕ Abone Ekle", callback_data="admin_adds")],
-            [InlineKeyboardButton("📢 Duyuru Yap", callback_data="admin_cast"), InlineKeyboardButton("💾 Yedek Al", callback_data="admin_backup")],
+            [InlineKeyboardButton("📢 Duyuru Yap", callback_data="admin_cast"), InlineKeyboardButton("📂 Yedek Yükle (Manuel)", callback_data="admin_restore_info")],
             [InlineKeyboardButton("🔙 Çıkış", callback_data="back_home")]
         ])
         await menu_switcher(client, message, info, btns)
@@ -655,7 +669,7 @@ async def main():
     await restore_data()
     asyncio.create_task(backup_loop())
     asyncio.create_task(worker())
-    print("✅ V95.0 SILENT MODE ACTIVE")
+    print("✅ V96.0 FIXED RESTORE ACTIVE")
     await idle()
     await save_backup("Kapanış", silent=False)
     await bot.stop()
