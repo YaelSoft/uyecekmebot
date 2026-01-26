@@ -22,10 +22,10 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 SESSION_STRING = os.environ.get("SESSION_STRING", "") 
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
 
-# 🔥🔥🔥 BURAYA LOG KANAL ID'SİNİ ELLE YAZ (Örn: -100123456789) 🔥🔥🔥
-MANUAL_LOG_ID = -1003695289737
+# 🔥 LOG KANAL ID (BURAYI KESİN DOLDUR) 🔥
+# Başında -100 olduğundan emin ol!
+MANUAL_LOG_ID = -1003695289737 
 
-# Öncelik Environment, yoksa Manuel ID
 ENV_LOG = os.environ.get("LOG_CHANNEL", "0")
 LOG_CHANNEL = int(ENV_LOG) if ENV_LOG != "0" else MANUAL_LOG_ID
 
@@ -63,12 +63,12 @@ LIMIT_VIP  = 500 * 1024 * 1024   # 500 MB
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV99")
+logger = logging.getLogger("YaelV100")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V99.0 SNITCH MODE Active 🟢"
+def home(): return "Yael Saver V100.0 DUAL ENGINE Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -82,35 +82,41 @@ async def restore_data():
     global db_cache, CREDIT_PACKS
     print(f"📥 YEDEK ARANIYOR (Kanal: {LOG_CHANNEL})...")
     
-    # Kanal ID kontrolü
     if LOG_CHANNEL == 0 or LOG_CHANNEL == -100123456789:
-        try: await bot.send_message(OWNER_ID, "⚠️ **UYARI:** Log Kanalı ID'si ayarlanmamış! Yedekleme çalışmaz.")
-        except: pass
+        print("⚠️ LOG KANALI AYARLI DEĞİL!")
         return
 
+    # Userbot ile aramayı deneyelim (Daha güvenilir)
     try:
         found = False
-        async for msg in bot.get_chat_history(LOG_CHANNEL, limit=50):
+        async for msg in userbot.get_chat_history(LOG_CHANNEL, limit=50):
             if msg.document and msg.document.file_name == DB_FILE:
-                path = await bot.download_media(msg)
+                path = await userbot.download_media(msg)
                 with open(path, "r") as f:
                     data = json.load(f)
                     if "users" in data: db_cache = data
                     if "config" in data and "prices" in data["config"]:
                         CREDIT_PACKS = data["config"]["prices"]
-                print(f"✅ YEDEK YÜKLENDİ: {len(db_cache['users'])} kullanıcı.")
-                try: await bot.send_message(OWNER_ID, f"✅ **BAŞARILI:** Log kanalından yedek yüklendi. ({len(db_cache['users'])} üye)")
+                print(f"✅ YEDEK YÜKLENDİ (Userbot): {len(db_cache['users'])} kullanıcı.")
+                try: await bot.send_message(OWNER_ID, f"✅ **YEDEK YÜKLENDİ!**\nVeri: {len(db_cache['users'])} kullanıcı")
                 except: pass
                 found = True
                 break
         if not found:
-            try: await bot.send_message(OWNER_ID, "ℹ️ Log kanalında yedek bulunamadı, sıfırdan başlandı.")
-            except: pass
+            # Bir de Bot ile deneyelim
+            async for msg in bot.get_chat_history(LOG_CHANNEL, limit=50):
+                if msg.document and msg.document.file_name == DB_FILE:
+                    path = await bot.download_media(msg)
+                    with open(path, "r") as f:
+                        data = json.load(f)
+                        if "users" in data: db_cache = data
+                    print(f"✅ YEDEK YÜKLENDİ (Bot): {len(db_cache['users'])} kullanıcı.")
+                    found = True
+                    break
     except Exception as e: 
-        try: await bot.send_message(OWNER_ID, f"❌ **YEDEK YÜKLEME HATASI:**\nBot kanala erişemiyor olabilir.\nHata: `{e}`")
-        except: pass
+        print(f"❌ YEDEK YÜKLEME HATASI: {e}")
 
-# 🔥 GELİŞMİŞ YEDEKLEME (HATA OLURSA SANA ATAR)
+# 🔥 ÇİFT MOTORLU YEDEKLEME (BOT YAPAMAZSA USERBOT YAPAR)
 async def save_backup(reason="Otomatik", silent=False):
     global db_cache, CREDIT_PACKS
     
@@ -121,33 +127,30 @@ async def save_backup(reason="Otomatik", silent=False):
     except: pass
 
     if silent: return
+    if LOG_CHANNEL == 0 or LOG_CHANNEL == -100123456789: return
 
     total_users = len(db_cache.get("users", {}))
     caption = f"💾 YEDEK ({reason})\n👥 {total_users}\n📅 {datetime.datetime.now()}"
 
-    # 2. Kanala Göndermeyi Dene
-    sent_to_channel = False
-    if LOG_CHANNEL != 0 and LOG_CHANNEL != -100123456789:
-        try:
-            await bot.send_document(LOG_CHANNEL, document=DB_FILE, caption=caption)
-            sent_to_channel = True
-        except Exception as e:
-            # Kanala atamazsa sebebini admine söyle
-            try: await bot.send_message(OWNER_ID, f"⚠️ **LOG KANALINA ATAMADIM!**\nHata: `{e}`\n\n_Dosyayı sana özelden atıyorum 👇_")
-            except: pass
+    # 2. ÖNCE BOT DENESİN
+    try:
+        await bot.send_document(LOG_CHANNEL, document=DB_FILE, caption=caption)
+        print("✅ YEDEK ATILDI (BOT)")
+        return
+    except Exception as e:
+        print(f"⚠️ Bot Atamadı ({e}), Userbot Devreye Giriyor...")
 
-    # 3. Kanala atamadıysa SANA AT
-    if not sent_to_channel:
-        try:
-            await bot.send_document(OWNER_ID, document=DB_FILE, caption=f"⚠️ **ACİL YEDEK (Kanal Hatası)**\n{caption}")
+    # 3. BOT ATAMAZSA USERBOT ATSIN (KESİN ÇÖZÜM)
+    try:
+        await userbot.send_document(LOG_CHANNEL, document=DB_FILE, caption=f"{caption}\n(Userbot ile gönderildi)")
+        print("✅ YEDEK ATILDI (USERBOT)")
+    except Exception as e2:
+        # Userbot da atamazsa sana özelden atar
+        try: await bot.send_document(OWNER_ID, document=DB_FILE, caption=f"⚠️ **KANALA GİDEMEDİ!**\n{caption}")
         except: pass
 
 async def backup_loop():
     await asyncio.sleep(10)
-    # Açılış raporu
-    try: await bot.send_message(OWNER_ID, f"🤖 **BOT BAŞLADI**\nLog Kanalı: `{LOG_CHANNEL}`\n(Kanalda admin miyim kontrol et)")
-    except: pass
-    
     await save_backup(reason="Bot Başlatıldı", silent=False)
     
     while True:
@@ -284,12 +287,14 @@ async def worker():
         used_source = None
         
         try:
+            # 1. HAK KONTROLÜ
             allowed, reason = check_access(user_id)
             if not allowed:
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 KREDİ/VİP AL", callback_data="shop_home")], [InlineKeyboardButton("👥 REFERANS KAS", callback_data="ref")]])
                 await status_msg.edit("❌ **HAKKINIZ BİTTİ!**\n\nKredi/Vip alarak veya referans kasarak hak kazanabilirsiniz.\n\n✨ _İyi kullanımlar dileriz.._", reply_markup=btn)
                 continue
             
+            # 2. PEŞİN DÜŞ (SESSİZ)
             used_source = reserve_credit(user_id)
             if not used_source:
                 await status_msg.edit("⛔ Bakiye hatası.")
@@ -297,6 +302,7 @@ async def worker():
             
             asyncio.create_task(save_backup(reason="Harcama", silent=True))
 
+            # 3. LİNK ANALİZİ
             chat_id, msg_id = None, None
             clean_link = link.replace("https://", "").replace("http://", "").replace("t.me/", "").replace("telegram.me/", "").split("?")[0]
             parts = clean_link.split("/")
@@ -351,6 +357,7 @@ async def worker():
                 if file_size > user_limit:
                     refund_credit(user_id, used_source)
                     asyncio.create_task(save_backup("İade", silent=True))
+                    
                     limit_mb = int(user_limit / 1024 / 1024)
                     btn = InlineKeyboardMarkup([[InlineKeyboardButton("💎 YÜKSELT", callback_data="shop_home")]]) if user_limit == LIMIT_FREE else None
                     await status_msg.edit(f"⚠️ **LİMİT AŞILDI ({limit_mb} MB)**\n\nBu dosya limitinizi aşıyor.", reply_markup=btn)
@@ -637,10 +644,9 @@ async def cb_handler(client, callback):
         txt = f"👥 **REFERANS SİSTEMİ**\n\nBu linki arkadaşlarına at:\n`{link}`\n\n🎁 **Kazanç:** Her gelen kişi için **+2 Kredi** kazanırsın!"
         await menu_switcher(client, callback.message, txt, InlineKeyboardMarkup([[InlineKeyboardButton("📤 Paylaş", url=f"https://t.me/share/url?url={link}"), InlineKeyboardButton("🔙 Geri", callback_data="back_home")]]))
     
-    # 🔥 MANUEL YEDEK ALMA BUTONU (GÜVENLİ)
     elif data == "admin_backup":
         await save_backup("Manuel", silent=False)
-        await callback.answer("✅ İşlem Başlatıldı!", show_alert=True)
+        await callback.answer("✅ Yedek Kanalına Gönderildi!", show_alert=True)
         
     elif data == "admin_prices":
         txt = "💰 **MEVCUT FİYATLAR**\n\n"
@@ -689,7 +695,7 @@ async def main():
     asyncio.create_task(worker())
     
     try:
-        print("✅ V99.0 SNITCH MODE ACTIVE")
+        print("✅ V100.0 DUAL ENGINE ACTIVE")
         await idle()
     except Exception as e:
         print(f"Hata: {e}")
@@ -703,6 +709,3 @@ if __name__ == '__main__':
     Thread(target=run_web).start()
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
-
-
-
