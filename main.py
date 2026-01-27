@@ -36,8 +36,10 @@ LINK_VIP_GROUP = "https://t.me/+ww1jYq7Ww7xlOTIx"
 # 📢 İSTEK / ÖNERİ KANALI
 LINK_SUGGESTION = "https://t.me/+5qvMHy1yDb85Nzk5"
 
-# ==================== 💰 FİYATLAR & LİMİTLER (3 KADEMELİ) ====================
+# ==================== 💰 GÜNCEL FİYATLAR & LİMİTLER ====================
 
+# 🔥 KREDİ PAKETLERİ (Yeni Fiyatlar)
+# Bot açılınca bu fiyatlar eskisini ezecek.
 DEFAULT_CREDIT_PACKS = {
     "c10":  {"name": "🥉 10 KREDİ",  "amount": 10,  "price_amt": 40, "price_lbl": "40 ⭐"},
     "c25":  {"name": "🥈 25 KREDİ",  "amount": 25,  "price_amt": 90, "price_lbl": "90 ⭐"},
@@ -57,19 +59,19 @@ SUB_PACKS = {
     }
 }
 
-# 🔥 LİMİT AYARLARI (Render Dostu)
-LIMIT_FREE = 100 * 1024 * 1024   # 100 MB (Beleşçi)
-LIMIT_PAID = 500 * 1024 * 1024   # 500 MB (Kredi Alan)
-LIMIT_VIP  = 1500 * 1024 * 1024  # 1.5 GB (VIP Abone)
+# 🔥 LİMİT AYARLARI (Adaletli Dağılım)
+LIMIT_FREE = 100 * 1024 * 1024   # 100 MB (Referansçılar ve Beleşçiler)
+LIMIT_PAID = 500 * 1024 * 1024   # 500 MB (Parayı Verenler)
+LIMIT_VIP  = 1500 * 1024 * 1024  # 1.5 GB (VIP Aboneler)
 
 DB_FILE = "users.json"
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("YaelV102")
+logger = logging.getLogger("YaelV103")
 
 # ==================== 🌐 WEB SERVER ====================
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Yael Saver V102.0 PRO COMMERCE Active 🟢"
+def home(): return "Yael Saver V103.0 JUSTICE MODE Active 🟢"
 def run_web(): app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 # ==================== 🤖 İSTEMCİLER ====================
@@ -82,33 +84,36 @@ db_cache = {"users": {}, "config": {"prices": DEFAULT_CREDIT_PACKS.copy()}}
 async def restore_data():
     global db_cache, CREDIT_PACKS
     print(f"📥 YEDEK ARANIYOR (Kanal: {LOG_CHANNEL})...")
-    if LOG_CHANNEL == 0 or LOG_CHANNEL == -100123456789: return
-
+    
+    # Userbot ile aramayı deneyelim
+    found_data = None
     try:
-        found = False
-        async for msg in userbot.get_chat_history(LOG_CHANNEL, limit=50):
-            if msg.document and msg.document.file_name == DB_FILE:
-                path = await userbot.download_media(msg)
-                with open(path, "r") as f:
-                    data = json.load(f)
-                    if "users" in data: db_cache = data
-                    if "config" in data and "prices" in data["config"]:
-                        CREDIT_PACKS = data["config"]["prices"]
-                print(f"✅ YEDEK YÜKLENDİ: {len(db_cache['users'])} kullanıcı.")
-                found = True
-                break
-        if not found:
-            async for msg in bot.get_chat_history(LOG_CHANNEL, limit=50):
+        if LOG_CHANNEL != 0:
+            async for msg in userbot.get_chat_history(LOG_CHANNEL, limit=50):
                 if msg.document and msg.document.file_name == DB_FILE:
-                    path = await bot.download_media(msg)
-                    with open(path, "r") as f:
-                        data = json.load(f)
-                        if "users" in data: db_cache = data
-                    print(f"✅ YEDEK YÜKLENDİ (Bot): {len(db_cache['users'])} kullanıcı.")
-                    found = True
+                    path = await userbot.download_media(msg)
+                    with open(path, "r") as f: found_data = json.load(f)
                     break
-    except Exception as e: 
-        print(f"❌ YEDEK YÜKLEME HATASI: {e}")
+            if not found_data:
+                async for msg in bot.get_chat_history(LOG_CHANNEL, limit=50):
+                    if msg.document and msg.document.file_name == DB_FILE:
+                        path = await bot.download_media(msg)
+                        with open(path, "r") as f: found_data = json.load(f)
+                        break
+    except Exception as e: print(f"❌ Yedek hatası: {e}")
+
+    if found_data:
+        if "users" in found_data: db_cache["users"] = found_data["users"]
+        
+        # 🔥 FİYAT GÜNCELLEME (Eski fiyatları eziyoruz)
+        # Yedekten gelen konfigürasyonu alıyoruz ama fiyatları koddan zorluyoruz.
+        print("♻️ FİYATLAR GÜNCELLENİYOR (Koddan)...")
+        CREDIT_PACKS = DEFAULT_CREDIT_PACKS.copy()
+        db_cache["config"] = {"prices": CREDIT_PACKS} 
+        
+        print(f"✅ YEDEK YÜKLENDİ: {len(db_cache['users'])} kullanıcı.")
+    else:
+        print("⚠️ Yedek bulunamadı, sıfırdan başlanıyor.")
 
 async def save_backup(reason="Otomatik", silent=False):
     global db_cache, CREDIT_PACKS
@@ -125,7 +130,6 @@ async def save_backup(reason="Otomatik", silent=False):
 
     try:
         await bot.send_document(LOG_CHANNEL, document=DB_FILE, caption=caption)
-        return
     except:
         try: await userbot.send_document(LOG_CHANNEL, document=DB_FILE, caption=f"{caption}\n(Userbot)")
         except: pass
@@ -151,12 +155,13 @@ async def manual_restore(c, m):
             global db_cache, CREDIT_PACKS
             with open(path, "r") as f:
                 new_data = json.load(f)
-                if "users" in new_data: db_cache = new_data 
-                if "config" in new_data and "prices" in new_data["config"]:
-                    CREDIT_PACKS = new_data["config"]["prices"]
+                if "users" in new_data: db_cache = new_data
+                # Manuel yüklemede de güncel fiyatları koruyalım
+                CREDIT_PACKS = DEFAULT_CREDIT_PACKS.copy()
+                
             with open(DB_FILE, "w") as f: json.dump(db_cache, f, indent=4)
             os.remove(path)
-            await msg.edit(f"✅ **YEDEK YÜKLENDİ!**\n👥 {len(db_cache['users'])}")
+            await msg.edit(f"✅ **YEDEK YÜKLENDİ!**\nFiyatlar güncel sürüme eşitlendi.")
             await save_backup("Manuel Restore", silent=False)
         except Exception as e: await msg.edit(f"❌ HATA: {e}")
 
@@ -166,11 +171,18 @@ def get_user(user_id, first_name=None):
     today = datetime.date.today().isoformat()
     if uid not in db_cache["users"]:
         db_cache["users"][uid] = {
-            "balance": 3, "total_spent": 0, "sub_type": "none", "sub_expiry": 0,
-            "daily_usage": 0, "last_reset": today, "invited_by": None,
+            "balance": 3, 
+            "total_spent": 0, 
+            "paid_orders": 0, # 🔥 YENİ: Ödeme Sayacı (Sadece para veren artsın)
+            "sub_type": "none", 
+            "sub_expiry": 0,
+            "daily_usage": 0, 
+            "last_reset": today, 
+            "invited_by": None,
             "first_name": first_name or "Kullanıcı"
         }
     user = db_cache["users"][uid]
+    if "paid_orders" not in user: user["paid_orders"] = 0 # Eski kullanıcılara ekle
     if first_name: user["first_name"] = first_name
     
     if user.get("last_reset") != today:
@@ -193,7 +205,7 @@ def check_access(user_id):
     if u["balance"] > 0: return True, "Kredi"
     return False, "Yetersiz"
 
-# 🔥 KADEMELİ LİMİT SİSTEMİ 🔥
+# 🔥🔥 KADEMELİ LİMİT SİSTEMİ (PARAYI VEREN DÜDÜĞÜ ÇALAR) 🔥🔥
 def get_size_limit(user_id):
     if user_id == OWNER_ID: return 100 * 1024 * 1024 * 1024
     u = get_user(user_id)
@@ -202,12 +214,12 @@ def get_size_limit(user_id):
     if u["sub_type"] != "none":
         return LIMIT_VIP
     
-    # 2. KREDİ ALAN / ESKİ MÜŞTERİ -> 500 MB
-    # (Bakiyesi var veya daha önce harcama yapmış)
-    if u["balance"] > 0 or u["total_spent"] > 0:
+    # 2. MÜŞTERİ (En az 1 kere para harcamış) -> 500 MB
+    # Referansla gelen krediler 'paid_orders'ı arttırmaz.
+    if u.get("paid_orders", 0) > 0:
         return LIMIT_PAID
         
-    # 3. BELEŞÇİ -> 100 MB
+    # 3. BELEŞÇİ / REFERANSÇI -> 100 MB
     return LIMIT_FREE
 
 def reserve_credit(user_id):
@@ -232,11 +244,13 @@ def refund_credit(user_id, source):
         u["balance"] += 1
         if u["total_spent"] > 0: u["total_spent"] -= 1
 
-def add_credits(user_id, amount):
+def add_credits(user_id, amount, is_paid=False):
     uid = str(user_id)
-    get_user(uid)
-    db_cache["users"][uid]["balance"] += amount
-    return db_cache["users"][uid]["balance"]
+    u = get_user(uid)
+    u["balance"] += amount
+    if is_paid:
+        u["paid_orders"] += 1 # 🔥 Sadece satın alımda artar
+    return u["balance"]
 
 def activate_subscription(user_id, sub_key):
     uid = str(user_id)
@@ -281,7 +295,6 @@ async def worker():
                 await status_msg.edit("❌ **HAKKINIZ BİTTİ!**\n\nKredi/Vip alarak veya referans kasarak hak kazanabilirsiniz.\n\n✨ _İyi kullanımlar dileriz.._", reply_markup=btn)
                 continue
             
-            # 🔥 PEŞİN DÜŞME (Baban gelse acıma)
             used_source = reserve_credit(user_id)
             if not used_source:
                 await status_msg.edit("⛔ Bakiye hatası.")
@@ -341,8 +354,8 @@ async def worker():
                     limit_mb = int(user_limit / 1024 / 1024)
                     
                     msg_txt = ""
-                    if user_limit == LIMIT_FREE: msg_txt = "💎 **LİMİT AŞILDI!**\nKredi alırsanız limitiniz **500 MB** olur."
-                    elif user_limit == LIMIT_PAID: msg_txt = "👑 **LİMİT AŞILDI!**\nVIP alırsanız limitiniz **1.5 GB** olur."
+                    if user_limit == LIMIT_FREE: msg_txt = "💎 **LİMİT AŞILDI!**\nSiz **Ücretsiz** pakettesiniz (100MB).\n\nKredi alırsanız limitiniz **500 MB** olur."
+                    elif user_limit == LIMIT_PAID: msg_txt = "👑 **LİMİT AŞILDI!**\nSiz **Standart** pakettesiniz (500MB).\n\nVIP alırsanız limitiniz **1.5 GB** olur."
                     
                     await status_msg.edit(f"⚠️ **Dosya: {int(file_size/1024/1024)} MB**\nSizin Limit: {limit_mb} MB\n\n{msg_txt}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 YÜKSELT", callback_data="shop_home")]]))
                     continue
@@ -377,9 +390,6 @@ async def worker():
                         rem = u['balance']
                         info_msg = f"📉 Kalan Hak: **{rem}**"
                     
-                    if rem <= 0 and u["sub_type"] == "none":
-                         info_msg = "❌ **HAKKINIZ BİTTİ!**\nYeni hak için mağazayı ziyaret edin."
-                    
                     await status_msg.edit(f"✅ **İşlem Tamam!**\n{info_msg}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menü", callback_data="back_home")]]))
                     
                 except Exception as send_e:
@@ -393,11 +403,11 @@ async def worker():
                 
             else:
                 refund_credit(user_id, used_source) 
-                await status_msg.edit("❌ Desteklenmeyen medya. Kredi iade edildi.")
+                await status_msg.edit("❌ Desteklenmeyen medya.")
                 
         except Exception as e:
             if used_source: refund_credit(user_id, used_source)
-            try: await status_msg.edit(f"❌ Hata: {e}\nKredi iade edildi.")
+            try: await status_msg.edit(f"❌ Hata: {e}")
             except: pass
             try: 
                 if 'path' in locals() and os.path.exists(path): os.remove(path)
@@ -414,9 +424,9 @@ def main_menu(user_id):
         days = int((u["sub_expiry"] - time.time()) / 86400)
         sub_txt = f"{SUB_PACKS[u['sub_type']]['name']} ({days} Gün)"
     
-    # 🔥 LİMİT GÖSTERGESİ
+    # 🔥 LİMİT GÖSTERGESİ (STATÜYE GÖRE)
     limit_val = get_size_limit(user_id)
-    limit_str = "100 MB 🔴"
+    limit_str = "100 MB 🔴" # Varsayılan (Beleş)
     if limit_val == LIMIT_PAID: limit_str = "500 MB 🟡"
     elif limit_val == LIMIT_VIP: limit_str = "1.5 GB 🟢"
 
@@ -426,9 +436,10 @@ def main_menu(user_id):
         f"💰 Kredi Bakiyesi: `{u['balance']}`\n"
         f"📅 VIP Abonelik: `{sub_txt}`\n"
         f"📂 İndirme Limiti: `{limit_str}`\n\n"
-        f"🌟 **AVANTAJLAR**\n"
-        f"• **Kredi Al:** 500 MB Limit açılır.\n"
-        f"• **VIP Al:** 1.5 GB Limit açılır.\n\n"
+        f"🌟 **STATÜ VE AVANTAJLAR**\n"
+        f"• **Ücretsiz:** 100 MB Limit.\n"
+        f"• **Müşteri (Kredi Alan):** 500 MB Limit.\n"
+        f"• **VIP (Abone):** 1.5 GB Limit.\n\n"
         f"🛠 **HİZMETLER (Admin ile Görüşün)**\n"
         f"• Kişiye Özel Bot Yapımı\n"
         f"• Toplu Kanal Kopyalama / Taşıma\n"
@@ -462,33 +473,29 @@ async def start(client, message):
     user_id = message.from_user.id
     u = get_user(user_id, message.from_user.first_name)
     
-    # 🔥 GELİŞMİŞ REFERANS SİSTEMİ
     if len(message.command) > 1:
         try:
             ref_id = message.command[1]
             if str(ref_id) != str(user_id) and u["invited_by"] is None:
                 # Sadece YENİ kullanıcı ise bonus ver
-                # Eğer daha önce kaydı varsa (balance değişmişse) vermiyoruz
                 is_new_user = (u["balance"] == 3 and u["total_spent"] == 0)
                 
                 if is_new_user:
                     db_cache["users"][str(user_id)]["invited_by"] = str(ref_id)
-                    db_cache["users"][str(user_id)]["balance"] += 2 # Davet edilene +2 (Toplam 5)
+                    # REFERANS KREDİSİ (Para vermediği için paid_orders artmaz!)
+                    add_credits(user_id, 2, is_paid=False) 
                     
                     if str(ref_id) in db_cache["users"]:
-                        db_cache["users"][str(ref_id)]["balance"] += 2
+                        add_credits(ref_id, 2, is_paid=False)
                         asyncio.create_task(save_backup("Referans", silent=True))
-                        # Davet edene bildirim
                         try: await client.send_message(int(ref_id), f"👥 **TEBRİKLER!**\nBir arkadaşınız referansınızla katıldı.\n💰 **+2 Kredi** kazandınız!")
                         except: pass
-                        # Gelene bildirim
                         try: await message.reply(f"🎁 **HOŞ GELDİNİZ!**\nReferans linkiyle geldiğiniz için **+2 Ekstra Kredi** hediye edildi!\nToplam: 5 Kredi")
                         except: pass
         except: pass
     txt, markup = main_menu(user_id)
     await message.reply(txt, reply_markup=markup)
 
-# 👑 ADMIN PANELİ
 @bot.on_message(filters.command("admin") & filters.user(OWNER_ID))
 async def admin_cmd(client, message):
     try:
@@ -534,7 +541,7 @@ async def discount_cmd(c, m):
 
 @bot.on_message(filters.command("addcredit") & filters.user(OWNER_ID))
 async def manual_c(c, m):
-    try: add_credits(m.command[1], int(m.command[2])); await m.reply("✅")
+    try: add_credits(m.command[1], int(m.command[2]), is_paid=False); await m.reply("✅")
     except: pass
 
 @bot.on_message(filters.command("duyuru") & filters.user(OWNER_ID))
@@ -623,7 +630,7 @@ async def cb_handler(client, callback):
     elif data == "service": await menu_switcher(client, callback.message, f"👨‍💻 **DESTEK**\n@{OWNER_USERNAME}", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
     elif data == "dl": await menu_switcher(client, callback.message, "📂 **İNDİRME MODU**\nLink yapıştır.", InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back_home")]]))
 
-# 🔥 ÖDEME ONAYI & UPSELL BİLDİRİMİ
+# 🔥 ÖDEME ONAYI (BURADA SİCİL İŞLENİR)
 @bot.on_raw_update()
 async def raw_pay(c, u, us, ch):
     if isinstance(u, UpdateBotPrecheckoutQuery):
@@ -640,15 +647,16 @@ async def success(c, m):
         key = pl.replace("cred_", "")
         pkg = CREDIT_PACKS.get(key)
         if pkg:
-            add_credits(m.from_user.id, pkg["amount"])
-            # 🔥 SATIŞ SONRASI UPSELL MESAJI 🔥
+            # 🔥 KRİTİK: is_paid=True olarak gönderiyoruz. 
+            # Bu sayede adamın "paid_orders" sayacı artacak ve limiti 500 MB olacak.
+            add_credits(m.from_user.id, pkg["amount"], is_paid=True)
+            
             await m.reply(
                 f"🎉 **ÖDEME BAŞARILI!**\n"
                 f"💰 +{pkg['amount']} Kredi yüklendi.\n"
-                f"🟡 **LİMİTİNİZ 500 MB OLDU!**\n\n"
-                f"🚀 _Daha büyük dosyalar (1.5 GB) indirmek ister misiniz?_\n"
-                f"👑 **VIP Paket** alarak en yüksek limite geçebilirsiniz!", 
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👑 VIP AL (1.5 GB)", callback_data="shop_subs")]])
+                f"🟡 **STATÜ YÜKSELDİ:** Müşteri (500 MB Limit)\n\n"
+                f"👑 _1.5 GB limit için VIP Paket alabilirsiniz._",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👑 VIP AL", callback_data="shop_subs")]])
             )
             try: await c.send_message(OWNER_ID, f"💰 SATIŞ: {pkg['name']}")
             except: pass
