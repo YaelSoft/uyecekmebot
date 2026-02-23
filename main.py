@@ -130,21 +130,57 @@ async def start(c, m):
 
 @bot.on_callback_query()
 async def cb_handler(c, cb):
-    uid, data = cb.from_user.id, cb.data
+    # 1. KRİTİK: Telegram'a "tıklama alındı" cevabı gönder (Butonun dönmesini durdurur)
+    try:
+        await cb.answer()
+    except:
+        pass
+
+    uid = cb.from_user.id
+    data = cb.data
     u = get_user(uid)
+    lang = u.get("lang", "tr")
+
+    # 2. VIP KONTROLÜ (Admin hariç herkese bariyer)
+    # Eğer kullanıcı VIP değilse ve işlemlere basıyorsa (m_ ile başlayanlar)
+    if not is_vip(uid) and data.startswith("m_"):
+        await cb.message.reply(
+            "⚠️ **Yael Saver Artık VIP Sistemindedir.**\n\n"
+            "Ücretsiz sürüm kaldırılmıştır. Yeni özellikler (Story, Toplu Transfer) eklenmiştir.\n"
+            "Devam etmek için lütfen @yasin33 ile iletişime geçin."
+        )
+        return
+
+    # 3. BUTON YÖNLENDİRMELERİ
     if data.startswith("set_"):
         u["lang"] = data.split("_")[1]
         txt, btn = get_main_menu(uid)
-        await cb.message.edit(txt, reply_markup=btn); return
-    if not is_vip(uid) and data.startswith("m_"):
-        await cb.answer("⚠️ Yael Saver VIP olmuştur. Ücretsiz versiyon kaldırılmıştır. İletişim: @yasin33", show_alert=True); return
-    if data == "m_stars": await cb.message.reply(f"⭐ Yıldızlı içerik talebi için: @{OWNER_USERNAME}")
+        await cb.message.edit(txt, reply_markup=btn)
+    
+    elif data == "m_single":
+        await cb.message.reply("🔗 **İndirmek istediğiniz medyanın linkini gönderin.**")
+        
+    elif data == "m_mass":
+        await cb.message.reply("🚚 **Toplu transfer için komutu kullanın:**\n`/transfer @kanaladi` ")
+        
+    elif data == "m_story":
+        await cb.message.reply("📸 **İndirmek istediğiniz hikaye (story) linkini gönderin.**")
+        
+    elif data == "m_stars":
+        await cb.message.reply(f"⭐ **Yıldızlı içerik kaydı için lütfen adminle görüşün:** @{OWNER_USERNAME}")
+
     elif data == "adm_home" and uid == OWNER_ID:
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("📢 DUYURU", callback_data="adm_cast")], [InlineKeyboardButton("➕ VIP EKLE", callback_data="adm_addvip"), InlineKeyboardButton("➖ VIP SİL", callback_data="adm_delvip")], [InlineKeyboardButton("💾 YEDEK AL", callback_data="adm_backup")]])
-        await cb.message.edit("👑 **ADMIN PANEL**", reply_markup=btn)
-    elif data == "adm_backup":
+        # Admin paneli butonları
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 DUYURU YAP", callback_data="adm_cast")],
+            [InlineKeyboardButton("➕ VIP EKLE", callback_data="adm_addvip"), InlineKeyboardButton("➖ VIP SİL", callback_data="adm_delvip")],
+            [InlineKeyboardButton("💾 YEDEK AL", callback_data="adm_backup")]
+        ])
+        await cb.message.edit("👑 **ADMIN KOMUTA MERKEZİ**", reply_markup=btn)
+
+    elif data == "adm_backup" and uid == OWNER_ID:
         with open(DB_FILE, "w") as f: json.dump(db_cache, f)
-        await bot.send_document(uid, DB_FILE, caption="💾 DB Backup"); await cb.answer("Gönderildi!")
+        await bot.send_document(uid, DB_FILE, caption="💾 Güncel Veritabanı Yedeği")
 
 # ==================== 🛠️ KOMUTLAR ====================
 @bot.on_message(filters.command("vip_ekle") & filters.user(OWNER_ID))
@@ -211,3 +247,4 @@ async def main():
 if __name__ == '__main__':
     Thread(target=run_web).start()
     asyncio.get_event_loop().run_until_complete(main())
+
